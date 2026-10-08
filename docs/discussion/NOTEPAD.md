@@ -36,6 +36,13 @@ A generic, queue-based server for any kind of work (document processing, OCR pip
 | D9 | Frontend: **Next.js**, in `frontend/src` | 2026-10-08 | Scope stays minimal: signup, login, API key list, create key, revoke key. Version to be checked against current docs. |
 | D10 | **Phase 1 job features:** submit job, status and progress via polling, result, retries with backoff, dead-letter queue. **Phase 2 (all wanted, built after the basic system works):** priorities, delayed/scheduled jobs, cancel, completion webhooks | 2026-10-08 | Phase 1 schema and queue design must leave room for the Phase 2 fields (`priority`, `run_at`, `cancel_requested`) so Phase 2 needs no rewrite. |
 | D11 | **No SSE / live streaming.** Polling is the baseline; webhooks (Phase 2) cover push notification | 2026-10-08 | Kept only as a wishlist idea. |
+| D12 | **Section 1 of the design approved** (containers, job path, folder layout). The outbox relay runs as its **own container** (same image, different command) | 2026-10-08 | Reason: it keeps publishing when the API restarts and scales on its own. Rule: `domain/` and `application/` never import from `adapters/`. |
+| D13 | **Primary keys: UUIDv7 on every table**, using the Postgres `uuid` type with `DEFAULT uuidv7()`. The app may also generate ids when it needs one before insert | 2026-10-08 | Needs **PostgreSQL 18** (native `uuidv7()`) and, for app-side generation, **Python 3.14** (`uuid.uuid7()` in stdlib). This replaces the earlier idea of pinning Python 3.12. TO VERIFY before pinning: FastAPI, SQLAlchemy, asyncpg etc. support Python 3.14, and the `postgres:18` Docker tag exists. API key secrets stay separate and fully random. Rejected: UUIDv4 (random inserts hurt the index), plain bigint (guessable ids), bigint plus public UUID (two ids everywhere). |
+| D14 | **Section 2 of the design approved**: data model (organisations, users, memberships, api_keys, jobs, job_attempts, outbox), browser session vs API key credentials, key shown once and stored hashed, trace ID end to end, OpenTelemetry + Tempo + Loki + Prometheus + Grafana, four test levels plus adapter contract tests and a docs-coverage test | 2026-10-08 | Q9 (observability stack) is settled by this approval. Q10 (integration test containers) is still open. |
+| D15 | **Section 3 of the design approved** (handler contract with Pydantic input/output schemas and explicit registration, at-least-once delivery with idempotent handlers, ack after DB commit, leases and heartbeats, PermanentError vs retryable errors, exponential backoff with jitter, dead-letter queue, roadmap phases 0 to 2 plus wishlist) | 2026-10-08 | One change requested: see D16. |
+| D16 | **Rate limiting is required in Phase 1** (moved up from the wishlist). Returns 429 with `Retry-After` | 2026-10-08 | Storage and what is limited are still to be decided (Q11, Q12). It must sit behind a `RateLimiter` adapter like everything else. |
+| D17 | Rate limit counters live in **Redis** (new Docker service, approved), behind a `RateLimiter` adapter. Redis is used only for limits, not for the job queue. **All four limits are in Phase 1**: requests per API key, requests per organisation, max waiting + running jobs per organisation, and a stricter per-IP limit on login and signup | 2026-10-08 | The user asked for **proper documentation** of rate limiting: a dedicated doc, plus every endpoint doc lists its limits and the 429 / `Retry-After` / rate limit headers behaviour. |
+| D18 | **Redis outage behaviour:** job and general API limits **fail open** (requests allowed, with an error log line, a metric and an alert); login and signup limits **fail closed** (requests rejected) | 2026-10-08 | "For now": the user may revisit later. Must be documented in the rate limit doc and in the code where the fallback triggers (explicit, per CLAUDE.md Module 4). |
 | D3 | "Dynamic API generation" means platform API keys: a logged-in user creates keys at runtime and uses them to call the platform APIs, like any real-world platform | 2026-10-08 | Not per-job-type endpoint generation. Keys stored hashed, revocable. |
 
 ## Open questions
@@ -48,9 +55,15 @@ A generic, queue-based server for any kind of work (document processing, OCR pip
 - ~~Q6~~: Answered, see D8.
 - ~~Q7~~: Answered, see D6.
 - ~~Q8~~: Answered, see D10 and D11.
-- Q9: Observability stack: proposal to be reviewed in the design (OpenTelemetry, Prometheus, Grafana, Loki, Tempo).
+- ~~Q11~~, ~~Q12~~: Answered, see D17.
+- ~~Q13~~: Answered, see D18.
+- Q10: Integration tests: throwaway containers started by test code vs a shared Compose test profile (to verify against pinned versions).
+- ~~Q9~~: Answered, see D14.
 
 ## Progress
 
 - 2026-10-08: Project folder checked. It only holds `CLAUDE.md`. Docker 29.5.2, Compose 5.1.3, Node 22.18 and Python 3.13.0a5 are installed.
 - 2026-10-08: Stack chosen (D1). Next step is to settle the open questions, then write `docs/ARCHITECTURE.md`.
+- 2026-10-08: Initial commit made (`d6c8a98`). Design Sections 1 to 3 approved (D12, D14, D15), rate limiting added (D16 to D18).
+- 2026-10-08: `docs/ARCHITECTURE.md` drafted and waiting for the user's review. Still open: Q10 (integration test setup), default rate limit values, which sample handler ships in Phase 1, version pinning checks (Python 3.14 support, `postgres:18` tag).
+- Next: user reviews the architecture doc, then the task inventory is presented for approval before anything is logged in `TODO.md`.
