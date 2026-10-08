@@ -38,7 +38,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 | Database | PostgreSQL 18 in Docker | D13 |
 | Primary keys | UUIDv7 on every table | D13 |
 | Broker | RabbitMQ, behind `QueueAdapter` | D5 |
-| File storage | MinIO (S3-compatible), behind `StorageAdapter` | D6 |
+| File storage | SeaweedFS (S3-compatible) in Docker, behind `StorageAdapter`. MinIO was dropped because its community edition is archived | D6, D20 |
 | Rate limiting | Redis, behind `RateLimiter` | D17 |
 | Job work | Handler plugins inside our own workers | D4 |
 | Login | Email and password now, OAuth later, behind `AuthProvider` | D7 |
@@ -46,6 +46,9 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 | API access | API keys created at runtime by logged-in users | D3 |
 | Observability | OpenTelemetry, Tempo, Loki, Prometheus, Grafana | D14 |
 | Relay | Separate container for publishing the outbox | D12 |
+| Background chores | Separate `maintenance` container (lease recovery, cleanup, purge) | D19 |
+| Retries and delays | New outbox rows with a `run_at` time. No broker delay queues | D22 |
+| Account features in Phase 1 | Signup, login, email verification. Password reset and invitations come later | D21 |
 
 ## 4. System overview
 
@@ -65,7 +68,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
                             | presigned URLs        +-------+            |
                             v                                            |
                          +-------+      reads outbox            +--------+--+
-                         | minio | <--------------+             |   relay   |
+                         | store | <--------------+             |   relay   |
                          +---^---+                |             +-----+-----+
                              |                    |                   | publishes
                              |            +-------+-----+             v
@@ -82,26 +85,27 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 |---|---|---|
 | `api` | HTTP API. Auth, validation, rate limits, job submit and status | Horizontally |
 | `worker` | Consumes jobs from RabbitMQ and runs handlers. Same image as `api`, different command | Horizontally |
-| `relay` | Reads the outbox table and publishes to RabbitMQ. Same image, different command | Small number of instances |
+| `relay` | Reads outbox rows that are due and publishes them to RabbitMQ. Same image, different command | Small number of instances |
+| `maintenance` | Background chores: lease recovery, outbox cleanup, session cleanup, job purge. Same image, different command. Not drawn in the diagram | Several copies are safe, each chore claims work with `SKIP LOCKED` |
 | `frontend` | Next.js app | Horizontally |
 | `postgres` | System of record for everything | Vertical, read replicas later |
 | `rabbitmq` | Delivers "job is ready" messages | Cluster |
 | `redis` | Rate limit counters only | Single, later cluster |
-| `minio` | Documents, scans, results | Distributed mode |
+| `storage` (SeaweedFS) | Documents, scans, results. Shown as `store` in the diagram | Distributed mode |
 | `otel-collector`, `tempo`, `loki`, `prometheus`, `grafana` | Observability | See section 12 |
 
-The relay is its own container (D12) so publishing keeps running when the API restarts, and it can be tuned separately.
+The relay is its own container (D12) so publishing keeps running when the API restarts, and it can be tuned separately. The `maintenance` container is separate from the relay (D19) so a slow cleanup can never delay publishing.
 
 ## 5. Life of a job
 
 1. The client calls `POST /v1/jobs` with an API key.
 2. The API checks the key, scopes and rate limits, then validates the payload against the job type's input schema. Bad input is rejected here with a clear error.
 3. In **one database transaction** the API inserts the `jobs` row (`queued`) and an `outbox` row. Either both exist or neither does.
-4. The relay reads unpublished outbox rows and publishes them to RabbitMQ, then marks them published. This removes the "saved but never queued" gap.
-5. A worker receives the message and claims the job by taking a **lease** (a time-limited claim on the job). The job becomes `running`.
+4. The relay reads outbox rows that are due (their `run_at` time has passed) and publishes them to RabbitMQ. It marks a row published only after RabbitMQ confirms it received the message. This removes the "saved but never queued" gap.
+5. A worker receives the message and tries to claim the job. The claim only succeeds if the job is still waiting to run. It then takes a **lease** (a time-limited claim) and a **lease token**, and the job becomes `running`. If the job cannot be claimed (already finished, or held by another worker), the worker acknowledges the message, logs it, and does nothing else.
 6. The worker calls the handler registered for the job type. While it runs, the worker sends heartbeats to extend the lease and may report progress.
 7. On success the result is saved and the job becomes `succeeded`. Only **then** is the RabbitMQ message acknowledged.
-8. On failure the job is retried with backoff, and after the last attempt it goes to the dead-letter queue and becomes `failed`.
+8. On failure, **in one database transaction**, the worker sets the job to `retrying` and inserts a new outbox row whose `run_at` is the backoff time (D22). The worker never publishes a retry to RabbitMQ itself. The relay publishes it when it is due. After the last attempt the job becomes `failed` and goes to the dead-letter queue. Every write the worker makes after the claim (heartbeat, progress, finish) must present the lease token, so a worker that lost its lease cannot overwrite a newer attempt.
 9. The client polls `GET /v1/jobs/{id}` for status, progress and result.
 
 ### State machine
@@ -123,7 +127,7 @@ backend/
   src/
     domain/          Pure business rules. Job, Organisation, ApiKey, state transitions.
     ports/           Interfaces only (see table below).
-    adapters/        One folder per technology: postgres/, rabbitmq/, minio/, redis/, password_auth/
+    adapters/        One folder per technology: postgres/, rabbitmq/, s3/ (object storage), redis/, password_auth/
     application/     Use cases (SubmitJob, CreateApiKey, ...). Depend on ports only.
     handlers/        Job-type plugins. `echo` for tests, then real ones (OCR etc.).
     api/             FastAPI routes, request and response models, auth and rate limit middleware.
@@ -143,7 +147,7 @@ docs/                ARCHITECTURE.md, apis/, adr/, specs/, discussion/
 | Port | First implementation | Could be replaced by |
 |---|---|---|
 | `QueueAdapter` | RabbitMQ | Postgres queue, Redis Streams, SQS |
-| `StorageAdapter` | MinIO (S3 API) | AWS S3, GCS, local disk |
+| `StorageAdapter` | SeaweedFS (S3 API) | AWS S3, GCS, local disk |
 | `RateLimiter` | Redis | In-memory (tests), other stores |
 | `AuthProvider` | Email and password | Google, GitHub, other OAuth |
 | `JobRepository` and other repositories | PostgreSQL | Other databases |
@@ -157,14 +161,19 @@ All primary keys are **UUIDv7** (D13). They are time-ordered, so inserts land at
 |---|---|
 | `organisations` | A tenant. Owns keys, jobs and usage. |
 | `users` | A person who can log in. |
+| `auth_identities` | How a user proves who they are: a password now, OAuth providers later (D7). |
+| `sessions` | Server-side browser sessions, so they can be revoked at once. |
+| `email_verification_tokens` | Single-use, expiring tokens for email verification (D21). |
 | `memberships` | User, organisation, role. |
 | `api_keys` | Organisation, name, prefix, secret hash, scopes, created_by, last_used_at, expires_at, revoked_at. |
 | `jobs` | id, organisation, type, payload (JSON), status, attempts, max_attempts, progress, result or a file reference, error, idempotency_key, trace_id, timestamps. Phase 2 fields exist from the start: `priority`, `run_at`, `cancel_requested`. |
 | `job_attempts` | One row per try: start, end, outcome, error. Shows why a job failed. |
-| `outbox` | Rows waiting to be published to RabbitMQ. |
+| `outbox` | Messages waiting to be published to RabbitMQ, each with a `run_at` time. A job gets a new row for its first run and for every retry or recovery (D22). |
 
 - `(organisation_id, idempotency_key)` is unique. If a client retries a submit after a network error, it gets the same job back, not a duplicate.
 - The jobs table is expected to grow large. UUIDv7 ordering makes time-based partitioning and archiving possible later. It is not built in Phase 1.
+- `jobs` also holds the lease fields (`lease_owner`, `lease_token`, `lease_expires_at`). Heartbeats and the final write must match the lease token; zero rows updated means the lease was lost.
+- Column-level detail, indexes and operating rules are in [`DATABASE.md`](DATABASE.md).
 - Schema changes go through Alembic migrations only.
 
 ## 8. Authentication and authorisation
@@ -189,6 +198,8 @@ Two kinds of credentials, kept apart on purpose:
 **Passwords** are hashed with Argon2. Login goes through the `AuthProvider` port, so OAuth providers can be added later without touching the rest of the system (D7).
 
 **Authorisation:** every query is scoped by the organisation of the credential. A key can never see another organisation's jobs.
+
+**OAuth rule for later (D7):** an OAuth login is never linked to an existing user just because the email matches, unless the provider states that the email is verified. Linking on an unverified email is a known account-takeover route.
 
 ## 9. Rate limiting
 
@@ -236,10 +247,12 @@ Handlers are **registered explicitly** in one file, not discovered by magic, so 
 
 ## 11. Reliability and delivery
 
-- **Transactional outbox** for submit (section 5): a job can never be saved without being queued, or queued without being saved.
+- **Transactional outbox** for submit and for every requeue (section 5, D22): a job can never be saved without being queued, or queued without being saved. The relay marks a row published only after RabbitMQ confirms receipt.
+- **Lease token.** Every heartbeat and final write says `WHERE id = ? AND status = 'running' AND lease_token = ?`. Zero rows updated means the worker lost its lease and must stop. The attempt is recorded as `lease_lost`.
 - **At-least-once delivery.** A message is acknowledged only after the worker has committed the outcome to Postgres.
-- **Leases and heartbeats.** If a worker dies, its lease expires and a recovery process requeues the job.
-- **Retries** use exponential backoff with jitter. In RabbitMQ this is done with delay queues that dead-letter back into the main queue. Phase 2 delayed jobs reuse the same mechanism.
+- **Leases and heartbeats.** If a worker dies, its lease expires and lease recovery (in the `maintenance` container) handles the job. Recovery checks the attempt count: a job that has used all its attempts is marked `failed` (and its open `job_attempts` row closed), never requeued forever. Otherwise recovery sets it to `retrying` and inserts a new outbox row, in one transaction.
+- **Retries** use exponential backoff with jitter. The delay is the `run_at` time on a new outbox row (D22). There are no RabbitMQ delay queues, so the broker stays swappable. Delay precision equals the relay's polling interval (about a second). Phase 2 delayed jobs reuse the same mechanism.
+- **Retry numbers (proposed defaults, per-handler settings):** 3 retries after the first run (so `max_attempts` = 4), with delays of about 10 seconds, 2 minutes and 10 minutes, each with random jitter. To be confirmed.
 - **Dead-letter queue.** After the last attempt the job moves there and is marked `failed`. All attempts stay in `job_attempts`.
 - **Idempotent submit** through the idempotency key (section 7).
 - **Backpressure.** Worker prefetch is limited so a worker never grabs more than it can run.
@@ -265,7 +278,7 @@ Handlers are **registered explicitly** in one file, not discovered by magic, so 
 | Level | What it covers | Runs against |
 |---|---|---|
 | Unit | Domain and use cases | In-memory fake adapters. Fast, no Docker. |
-| Integration | Each adapter against the real service | Real Postgres, RabbitMQ, Redis, MinIO |
+| Integration | Each adapter against the real service | Real Postgres, RabbitMQ, Redis, SeaweedFS |
 | Contract | One shared test suite that every implementation of a port must pass | Every adapter of that port |
 | End to end | Full flows through the complete Compose stack | Everything |
 | Docs check | Every route has a matching file in `docs/apis/` | Source and docs |
@@ -302,8 +315,9 @@ How integration tests start their services (throwaway containers from test code,
 | Phase | Scope |
 |---|---|
 | **0, Foundation** | Repo layout, Compose stack, startup config validation, observability skeleton, CI, docs check |
-| **1, Core** | Organisations, signup and login, API keys and their Next.js pages, submit job, status, result, worker, retries and dead-letter, rate limiting (all four limits), `echo` handler plus one real sample handler, e2e flows, API docs, rate limit docs |
+| **1, Core** | Organisations, signup and login, email verification, API keys and their Next.js pages, submit job, status, result, worker, retries and dead-letter, rate limiting (all four limits), `echo` handler plus one real sample handler, e2e flows, API docs, rate limit docs |
 | **2** | Priorities, delayed jobs, cancel, completion webhooks |
+| **Later (deferred by decision D21)** | Password reset, member invitations |
 | **Wishlist** | OAuth providers, other queue adapters, per-organisation limit overrides, time partitioning of `jobs`, external workers, SSE |
 
 ## 18. Open items
@@ -315,6 +329,13 @@ These must be settled before or during Phase 0. None of them changes the shape o
 3. **Integration test setup** (throwaway containers vs Compose test profile).
 4. **Default limit values** for the four rate limits.
 5. **Which real sample handler** ships in Phase 1.
+6. **Sending email.** Email verification is in Phase 1 (D21), but there is no mail service yet. Proposal: an `EmailSender` port with an SMTP adapter, and a mail-catcher container for development and tests. Needs approval because it adds a service.
+7. **File upload entry point.** Files travel by presigned URL, but no endpoint is designed to get one. OCR flows depend on it.
+8. **CSRF protection and idle timeout** for cookie sessions. Neither is designed yet.
+9. **Trusted proxy list.** The per-IP login limit needs to know which proxy headers to trust, or the limit can be dodged by spoofing the header.
+10. **SeaweedFS check (D20).** Verify presigned URLs, large and multipart uploads, and bucket lifecycle rules before pinning.
+11. **Rate limit design after DATABASE.md assumption A5.** If the active-jobs count is taken from Postgres instead of Redis, section 9 changes and decision D18 no longer applies to that cap.
+12. **Organisation and user deletion flow.** `jobs` blocks deleting an organisation by design, but the flow is not described.
 
 ## 19. Known risks
 
