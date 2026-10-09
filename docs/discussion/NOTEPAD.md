@@ -1,8 +1,8 @@
 # Discussion Notepad
 
-This file is the full memory of the design discussion. A new session should be able to read only this file (plus `CLAUDE.md` and `docs/ARCHITECTURE.md`) and continue without guessing what was decided, why, what else was considered, or how the parts connect.
+This file is the full memory of the design discussion. A new session should be able to read only this file (plus `CLAUDE.md`, `docs/ARCHITECTURE.md` and `docs/DATABASE.md`) and continue without guessing what was decided, why, what else was considered, or how the parts connect.
 
-Last updated: 2026-10-08 · Session: `qfe-8-10-2026`
+Last updated: 2026-10-09 · Session: `qfe-8-10-2026`
 
 How to read it:
 
@@ -20,10 +20,10 @@ Plain English is required for explanations to the user (`CLAUDE.md`, Module 10).
 | Item | State |
 |---|---|
 | Phase of work | Design. No product code, no scaffolding, no dependencies installed. |
-| Done | Requirements gathered. Design Sections 1, 2 and 3 approved by the user. Rate limiting added. `docs/ARCHITECTURE.md` written. |
-| Waiting on | The user's answers on: Q15 (email sending service), Q16 (file upload endpoint), the retry defaults (4 tries, 10s / 2min / 10min, jitter), and assumptions A1 to A9 in `DATABASE.md` (especially A5, which would change `ARCHITECTURE.md` section 9 and D18). |
-| Docs state | `ARCHITECTURE.md` and `DATABASE.md` were updated on 2026-10-08 for D19 to D22 and the confirmed review fixes (lease token, recovery checks attempts, outbox as one-to-many, FK indexes, scopes CHECK, publisher confirms, purge only final states, OAuth linking rule, SeaweedFS). Items that needed a decision were added as open items (`ARCHITECTURE.md` section 18) instead of being decided. **Not committed yet.** |
-| Next step | After the user approves the architecture doc: present the **task inventory** (phases, wishlist, version checks) in plain English. Only after approval, write items to `TODO.md` as `[ ]`. |
+| Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D35 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 to match all of them. |
+| Waiting on | The user's review and approval of the rewritten `ARCHITECTURE.md` and `DATABASE.md`. Nothing else is blocking: the remaining open items (section 10) are Phase 0 verifications and tuning defaults. |
+| Docs state | Both design docs match D19 to D35 as of 2026-10-09. They are drafts until the user approves them. **The 2026-10-09 rewrite is not committed yet.** |
+| Next step | After the user approves both docs: present the **task inventory** (Phase 0, Phase 1, Phase 2, deferred list, verification tasks) in plain English. Only after approval, write items to `TODO.md` as `[ ]`. |
 | After that | Per item: verify the code or setup, write a short spec in `docs/specs/`, get approval, then implement on the checked-out branch. |
 | Commits | History was rewritten on 2026-10-08 to remove `CLAUDE.md` (user chose option C1). Current local commits: `0544977` initial commit (notepad), `db790a4` architecture doc and notepad update. Branch: `master`. The old hashes `d6c8a98` and `80f32a0` no longer exist locally. **The user says they ran the force-push themselves** (the Claude session cannot authenticate to GitHub: `Permission denied (publickey)`), so GitHub should now match; not verified from this session. `CLAUDE.md` stays on disk and is ignored through `.git/info/exclude` (local only). |
 | Not created yet | `TODO.md`, `docs/specs/`, `docs/adr/`, `docs/apis/`, any code. |
@@ -89,6 +89,8 @@ Everything happened on 2026-10-08. Each row is one exchange.
 | 13 | User asked for this notepad to hold the full reasoning, not just decisions. | This rewrite. | Makes cross-session continuation possible without guessing. |
 | 14 | User asked for the database plan. | `docs/DATABASE.md` written as a draft, with assumptions A1 to A9 for the user to confirm. | Gave the schema, indexes and operating rules. |
 | 15 | User pasted a review from another session. I checked it against the files and searched for the MinIO claim and the partitioning claim. I asked four questions. | Chores: separate `maintenance` container (D19). Storage: **SeaweedFS** (D20). Account scope: **email verification only** in Phase 1, reset and invites deferred (D21). On the requeue design the user asked for a **detailed explanation** before deciding (Q14). | MinIO is archived, which changed D6. The review found six real holes in DATABASE.md. |
+| 16 | User asked about "ack after claim" and requeues; I asked four questions (routing, sweep, failed-job re-run, A5); the user interrupted and pasted a large decision pack from several analysis sessions. I analysed it and found eight problems (isolation claim, in-flight messages, no account recovery, proxies, file upload gaps, handler imports, sweep count, lock order). | User answered: account recovery **log and defer**, trusted proxy **log and defer**. Asked me to explain worker pools and items 2, 5 and 8. | See D23 to D35 and "Deferred / later". |
+| 17 | User was confused by my word "slot"; I explained it means concurrency. User clarified that concurrency varies per pool (OCR 1, email sending tuned by load testing). | Agreed: dedicated pools through `WORKER_JOB_TYPES`, concurrency per pool, no per-type cap (D35). I then rewrote `ARCHITECTURE.md` and `DATABASE.md` for D19 to D35 and this notepad. | Docs are consistent with the decision pack. |
 
 ## 5. Decisions in detail
 
@@ -124,6 +126,8 @@ Each decision lists: what, who decided, why, what was rejected, what it forces e
 - **Door left open:** the job lifecycle (claim, heartbeat, complete) is kept clean so external workers could be added later without redesign.
 
 ### D5. RabbitMQ is the first broker, behind a `QueueAdapter`
+
+> **History note.** This entry mentions RabbitMQ dead-letter exchanges and delay patterns as reasons for choosing it. Retries no longer use them (D22, D24) and there is no dead-letter queue (D25). RabbitMQ stays the broker, now with one queue per job type (D28). Entry kept as history.
 
 - **Decided by:** the user, from RabbitMQ, a Postgres queue, or Redis Streams.
 - **Why RabbitMQ:** real broker from day one. Built-in acknowledgements, dead-letter exchanges, priorities and delay patterns, and a management UI. Fits "will be used at large scale".
@@ -205,6 +209,8 @@ Each decision lists: what, who decided, why, what was rejected, what it forces e
 
 ### D14. Design Section 2 approved
 
+> **Partly superseded.** The "browser session cookie" credential is replaced by access and refresh tokens (D32). The data model changed: `sessions` is gone, `refresh_tokens`, `files` and `job_files` were added (see `DATABASE.md`).
+
 Approved content: the data model, the two credential kinds, the key format, observability, and testing.
 
 - **Data model:** `organisations`, `users`, `memberships`, `api_keys`, `jobs`, `job_attempts`, `outbox`. Idempotency key unique per organisation, so a client that retries after a network error gets the same job back instead of a duplicate.
@@ -215,6 +221,8 @@ Approved content: the data model, the two credential kinds, the key format, obse
 - **Open at the time:** whether integration tests start throwaway containers from test code or use a shared Compose test profile. Still open (Q10).
 
 ### D15. Design Section 3 approved
+
+> **Partly superseded.** "Ack only after the DB commit" is replaced by D23 (ack right after the claim). RabbitMQ delay queues are replaced by D22 and D24. The dead-letter queue is removed by D25. The rest stands.
 
 - **Handler contract and registration:** see D4.
 - **Delivery:** at-least-once. A message is acknowledged only after the worker commits the result to Postgres. A job can therefore occasionally run twice, so **every handler must be safe to run twice** (a hard rule).
@@ -251,6 +259,8 @@ Approved content: the data model, the two credential kinds, the key format, obse
 - **Default values:** not decided. Limit values are configuration with safe defaults (tuning knobs, so code defaults are allowed). Per-organisation overrides are a wishlist extension.
 
 ### D18. Redis outage behaviour (explicit fallback)
+
+> **Revised by D29.** The active-jobs cap is now counted in Postgres, so it does not depend on Redis and is not "fail open". The fail-open and fail-closed rules below apply to the three Redis-based limits only.
 
 - **Decided by:** the user chose my recommended option 1 "for now" and asked for it to be documented.
 - **Behaviour:**
@@ -300,6 +310,8 @@ The user ran a separate session that read `NOTEPAD.md`, `ARCHITECTURE.md` and `D
 
 ### D21. Phase 1 account scope: email verification only
 
+> **Superseded by D30 (2026-10-09).** Email verification was later taken out of Phase 1 as well. Password reset and invitations remain deferred. Kept here as history.
+
 - **Decided by:** the user. Email verification is in Phase 1. **Password reset and member invitations are deferred** to a later phase and must be logged as deferred items.
 - **My assumption (unchallenged by the user):** signup creates a first organisation automatically, with the new user as `owner`.
 - **Consequence not yet decided (Q15):** email verification needs a way to send email. The architecture has no mail service yet. Proposed: an `EmailSender` port with an SMTP adapter, and a local mail catcher container in Compose for development and tests. Needs the user's approval because it adds a service.
@@ -311,20 +323,185 @@ The user ran a separate session that read `NOTEPAD.md`, `ARCHITECTURE.md` and `D
 - **The rule:** the worker (or the maintenance container's lease recovery) never publishes a retry to RabbitMQ. In **one database transaction** it sets the job status (`retrying`) and inserts a new `outbox` row with `run_at` = the time the job may run again. Only the **relay** publishes, and only rows whose `run_at` has passed.
 - **Why:** removes the gap where a job is set to `retrying` but the message is never published. A crash before the commit changes nothing (the lease expires and the maintenance container recovers it). A crash after the commit still leaves the outbox row for the relay.
 - **Consequences:** a job can have many outbox rows over its life, so the ERD becomes `jobs ||--o{ outbox`. The same mechanism serves retries, lease recovery and Phase 2 delayed jobs. The broker stays swappable because it needs no delay feature. Delay precision equals the relay's polling interval (about a second). The relay needs a partial index on `run_at` for unpublished rows.
-- **Retry numbers (user's stated plan, to be confirmed as defaults):** 3 retries with exponential backoff of 10 seconds, 2 minutes and 10 minutes. Counting the first run, that is `max_attempts = 4`. Delays get random jitter (about ±20%, to confirm). These are per-handler settings with defaults; the exact default values are not yet written in any doc. After the last failure the job becomes `failed` and goes to the dead-letter queue.
+- **Retry numbers (user's stated plan, to be confirmed as defaults):** 3 retries with exponential backoff of 10 seconds, 2 minutes and 10 minutes. Counting the first run, that is `max_attempts = 4`. Delays get random jitter (about ±20%, to confirm). These are per-handler settings with defaults; the exact default values are not yet written in any doc. After the last failure the job becomes `failed` (there is no dead-letter queue, D25).
 - **Docs to update:** `ARCHITECTURE.md` sections 5, 11 and 4 (D19), `DATABASE.md` (outbox table, ERD, recovery, indexes), and the review fixes listed above.
+
+## Decision pack of 2026-10-09 (D23 to D35)
+
+The user ran several analysis sessions and pasted the resulting decisions. I checked them against the files and against current sources before writing them down. Where a decision did not do what it claimed, I said so and the user settled it in the conversation. Items marked **refinement** were added by the docs pass to close a gap; the user did not object to them.
+
+### D23. Ack right after the claim
+
+- **Decided by:** the user. Supersedes "ack after DB commit" in D15 and `ARCHITECTURE.md` section 11.
+- **Claim:** one transaction: `UPDATE jobs SET status='running', lease_owner=:w, lease_token=:new_random, lease_expires_at=now()+:lease, attempts=attempts+1, started_at=COALESCE(started_at, now()) WHERE id=:id AND status IN ('queued','retrying') AND run_at <= now()`, plus a `job_attempts` insert.
+- **Claim succeeded:** commit, **ack**, run the handler. **Claim refused** (finished, owned by someone else, or not due yet): ack and log the reason. Not an error.
+- **Crash before the claim commits:** the message was never acked, so RabbitMQ delivers it again; nothing changed in the database. **Crash after:** the lease expires and recovery takes over.
+- **All guarded writes:** heartbeat, finish, retry and fail use `WHERE id=? AND status='running' AND lease_token=?`. Zero rows updated means the lease was lost, so the worker stops and the attempt is recorded as `lease_lost`.
+- **Why:** RabbitMQ closes a channel when a delivered message stays unacked for more than 30 minutes by default (source in section 7). OCR and generation jobs can run longer. Postgres leases already protect running jobs.
+- **Concurrency (D35):** prefetch no longer limits how many jobs run, because acked messages free their place. The worker consumes only while it has free concurrency and cancels its consumers when full.
+- **Refinement (wording corrected):** the pack said the worker "never holds a delivered but unstarted message". That cannot be guaranteed: messages already in flight when it cancels still arrive. So a worker may briefly hold **at most one delivered, unclaimed message per queue**. If it cannot start one within a short wait (tuning value), it nacks it with requeue so another worker can take it. The RabbitMQ consumer timeout stays an explicit setting. The pack's instruction to "remove the ack-timeout concern" is therefore only true for running jobs, not for a message waiting for a free place.
+
+### D24. Delay, not timestamp
+
+- **Decided by:** the user. Supersedes the timestamp wording in D22.
+- The domain function returns a **duration** with jitter (about 10 seconds, 2 minutes, 10 minutes, ±20%), using the `Clock` port only for tests. SQL writes `run_at = now() + :delay` into both `jobs.run_at` and the new `outbox.run_at` in the same transaction, so they always match (`now()` is one value inside a transaction).
+- Why not a timestamp from the app: an app server with a wrong clock would make retries too early or too late. The claim and the relay both compare with the database clock.
+- Relay (`outbox.run_at <= now()`) and claim (`jobs.run_at <= now()`) use the same value on the same clock, so a published message is never refused as "too early".
+- `jobs.run_at` means "do not run before this time" and is used from Phase 1. `outbox.run_at` is a copy for fast relay lookups. Phase 2 delayed jobs keep the client's absolute time, compared on the database clock.
+
+### D25. No dead-letter queue
+
+- **Decided by:** the user. Supersedes the dead-letter parts of D15 and D22. D5's history stays, marked superseded.
+- `jobs.status = 'failed'` plus `job_attempts` is the only failure record. Metric `jobs_failed_total` by job type and error code, and an alert on the failed rate.
+- **Unprocessable message** (unknown job id, corrupt body): ack, log an error with the size only (no content), count a metric. The sweep covers the job if one exists.
+- **Phase 1 API:** `GET /v1/jobs` with a status filter and keyset pagination, and `GET /v1/jobs/{id}/attempts`. Each needs its own file under `docs/apis/`.
+- **Manual retry of a failed job** (`POST /v1/jobs/{id}/retry`) is deferred to Phase 2: it reopens a final state, which touches the state machine, the purge rule and the attempt counter.
+
+### D26. Unknown job type (Rule 1, shrunk)
+
+- **Decided by:** the user. With D28 a worker only consumes queues for types it knows. If a message for an unknown type arrives anyway (misconfiguration): do not claim, ack, log an error, count a metric. The sweep re-queues it.
+- Removed from the earlier proposal: the outbox bounce, the 15-minute give-up, and an `unsupported_type` reason.
+
+### D27. Safety-net sweep in `maintenance`
+
+- **Decided by:** the user. Needed because after an early ack, a message acked without a claim leaves a job with no owner and no message, and recovery only looks at `running` jobs.
+- **Finds:** jobs with `status IN ('queued','retrying')`, `run_at < now() - wait`, no unpublished outbox row, and a newest outbox row older than `wait`.
+- **Growing wait:** 5, 10, 20, 40 minutes, capped at 1 hour, each time the same job is re-queued by the sweep. A fixed wait could add a duplicate message for every waiting job every few minutes during a deep backlog, making the backlog worse.
+- **Refinement:** count only `reason='sweep'` outbox rows **since the job's last claim**, so a job swept long ago does not keep a long wait.
+- A cap on jobs handled per run. One transaction per job, `SKIP LOCKED`. `outbox.reason` column with a CHECK: `submit`, `retry`, `recovery`, `sweep`.
+- Indexes: partial `jobs (run_at) WHERE status IN ('queued','retrying')`; `outbox (job_id, created_at DESC)`.
+- Every sweep re-queue logs a warning, increments a metric and can alert, because it should be rare and usually means a bug.
+- Added to the chores list in `ARCHITECTURE.md` sections 4 and 11 and `DATABASE.md` sections 5 and 10.
+
+### D28. One RabbitMQ queue per job type
+
+- **Decided by:** the user (their words: the per-type queue was agreed). Direct exchange; `outbox.routing_key` is the job type.
+- Workers consume only the queues of types they serve. Every process that knows a type (api, relay, worker) idempotently declares that type's durable queue and binding at startup, so a message for a brand-new type has a queue to wait in during a rolling deploy.
+- **Publishing:** the relay uses the mandatory flag and publisher confirms. Verified (section 7): RabbitMQ returns an unroutable message **before** it confirms, and without the mandatory flag it would confirm and silently drop it. A returned message counts as a failed publish: `published_at` stays null, and `publish_attempts` and `last_error` are updated.
+- **Alerts:** a queue has messages but no consumers; queue depth growing per type (RabbitMQ Prometheus metrics). `job_type` is a safe metric label; `org_id` and `job_id` are not.
+- **Benefits:** per-type scaling, safe rolling deploys, and (together with D35 pools) slow jobs that do not block fast ones. Later: priorities through RabbitMQ priority on each queue.
+- **Correction recorded:** separate queues alone do **not** stop slow jobs from blocking fast ones, if one worker serves every queue and shares one concurrency limit. Isolation comes from dedicated worker pools (D35).
+- **Refinement:** the API and relay must not load heavy handler libraries just to know about a type. So a light **job type definition** (name, version, schemas, retry settings) is separate from the heavy **handler implementation**. Only workers load handlers.
+- **Known limits:** a per-type queue is first-in-first-out across all organisations (the active-jobs cap bounds the damage; fair scheduling is wishlist). Removing a type leaves an orphan queue, so a cleanup policy is needed eventually.
+- The `QueueAdapter` contract suite must cover "one queue per type" and "an unroutable publish is reported".
+
+### D29. Active-jobs cap counted in Postgres, exact (A5 and A6)
+
+- **Decided by:** the user. Supersedes the Redis counter in D17 for this one limit, and revises D18.
+- **Capped count** inside the submit transaction: `SELECT count(*) FROM (SELECT 1 FROM jobs WHERE organisation_id=:org AND status IN ('queued','retrying','running') LIMIT :cap+1)`. Cost never grows past the cap. Keep the cap in the low thousands.
+- **Exact (A6 amended):** submit takes a per-organisation transaction-level advisory lock, then runs the capped count and the insert. Submits for different organisations do not block each other.
+- **Order (refinement):** take the lock; check the idempotency key (return the existing job); check files; capped count; insert; commit. Checking the key before the lock lets two identical requests both pass; counting before the key check could refuse a harmless repeat at the cap.
+- If two same-key requests still collide, catch the unique violation and return the existing job.
+- **D18 revised:** Redis keeps only the three request-rate limits. API and organisation request limits fail open on a Redis outage; login and signup limits fail closed; the active-jobs cap does not depend on Redis at all.
+- Verify in Phase 0: a transaction-level advisory lock with PgBouncer transaction pooling (a session-level lock would not be safe). Test: concurrent submits never exceed the cap. A lock-free, overshoot-tolerant submit is deferred.
+
+### D30. Phase 1 scope trim: no email verification
+
+- **Decided by:** the user. **Supersedes D21.**
+- Email verification is out of Phase 1: no `email_verification_tokens` table, no `EmailSender`, no mail-catcher container. Q15 is closed as deferred.
+- `users.email_verified_at` stays in the schema and stays empty. The OAuth rule "never link by an unverified email" is kept.
+- **Signup accepts any email address** in Phase 1, and creates the user's first organisation automatically, with the user as `owner`. (The organisation auto-creation is now written as decided.)
+- **Consequence the user accepted knowingly:** with no verification and no password reset, there is no account recovery in Phase 1 (see Deferred).
+
+### D31. File upload in Phase 1
+
+- **Decided by:** the user. Flow: (a) `POST /v1/files` with file name, size and content type returns a `file_id` and a presigned upload URL; (b) the client uploads straight to storage; (c) the job payload carries the `file_id`; (d) at submit the API checks that the file belongs to the organisation and exists in storage (HEAD), and rejects a bad reference at once; (e) large results are stored as files, and `GET /v1/jobs/{id}` returns a short-lived download URL.
+- **`files` table:** id, organisation_id, kind (`input`/`result`), server-generated `storage_key` namespaced by organisation, display name, content type, declared size, status (`pending`/`available`), created_at, expires_at (for unused pending files). `jobs.result_ref` becomes `jobs.result_file_id` referencing `files`.
+- Single presigned upload up to a size cap in Phase 1. Multipart is later.
+- **Config:** size cap, short presigned URL lifetime, and a **required public storage URL** for presigned links (a link signed for an internal Docker host name does not work for outside clients). A missing value fails at startup (Module 4).
+- **New scopes** `files:read` and `files:write`, added to the `api_keys.scopes` CHECK.
+- **Refinements closing four gaps found in review:**
+  1. A file becomes `available` at the first submit that finds it with a HEAD check. No extra endpoint.
+  2. Payloads are free-form, so an input schema declares file fields with a typed `FileRef`. That is how the API finds file ids to check.
+  3. A plain presigned PUT does not enforce a maximum size. Use a presigned POST policy with a size range if SeaweedFS supports it, otherwise check the real size after upload. Verify in Phase 0.
+  4. A `job_files` link table records which files a job uses, so cleanup never removes a file a queued or retrying job still needs.
+- **Retention:** `maintenance` purges unused pending files; used files follow job retention; a bucket lifecycle rule backs it up.
+- Each endpoint gets a file under `docs/apis/` listing its rate limits. Verify in Phase 0: SeaweedFS presigned PUT and GET, size conditions, lifecycle rules.
+
+### D32. Login uses access and refresh JWTs
+
+- **Decided by:** the user. Replaces the sessions table and assumption A2, and replaces the "browser session cookie" wording in D14.
+- **Access token:** about 15 minutes, signed (PyJWT), held in browser memory, sent as `Authorization: Bearer`. Claims: `iss`, `aud`, `sub`, `exp`, `iat`, `jti`, `org_id`, `role`, `fam`.
+- **Refresh token:** also a signed JWT, in an httpOnly, Secure, `SameSite=Strict` cookie scoped to the refresh path. Its own `aud` and `typ: refresh` mean the two types cannot be used in place of each other.
+- **Server side:** `refresh_tokens` table keyed by `jti`, with family id, `used_at`, `revoked_at`, `replaced_by`, ip, user agent. Each refresh rotates the token. Reusing a used `jti` revokes the whole family.
+- **Logout** revokes the family. The access token stays valid until it expires (accepted). API key management re-reads the user and membership from the database on every call.
+- **My note, not an objection:** the `refresh_tokens` table is effectively the old sessions table, so the saving over server-side sessions is small. The pattern is common and the user chose it.
+
+### D33. Auth libraries: PyJWT and pwdlib[argon2]
+
+- **Decided by:** the user. Thin login and refresh code of our own behind the `AuthProvider` port. Frameworks (FastAPI Users, AuthX, Authlib server, external identity servers) were considered and rejected for Phase 1.
+- **No dependencies are added yet.** Phase 0 checks versions and Python support, then asks for approval (Modules 3 and 5). Signing secret, issuer and audience are required config that fails at startup. I have not verified either library.
+
+### D34. Database assumptions settled
+
+- **Decided by:** the user. Approved: A1 (text with CHECK for statuses), A3 (three roles), A4 (SHA-256 for API keys, Argon2 for passwords), A7 (no partitioning in Phase 1), A8 (organisation isolation in application code, with a contract test proving one organisation can never read another's jobs or files through any repository method), A9 (no down-migrations in production). A2 is replaced by D32. A5 and A6 are in D29.
+
+### D35. Worker pools and concurrency
+
+- **Decided by:** the user, after a discussion where I over-used the word "slot" (it just means concurrency). Dedicated pools come from a setting, not automatically from per-type queues.
+- `WORKER_JOB_TYPES` lists the job types a worker container serves. It consumes only those queues. If unset, the worker serves every type it has code for, and logs that choice. Startup fails if a listed type does not exist. Run separate containers for separate pools (for example OCR workers on bigger machines).
+- **Concurrency is set per pool:** OCR stays at 1 (one heavy job per process; scale by adding containers). Email sending might run higher, tuned after load testing.
+- **No per-type cap inside one worker.** It was considered and dropped: it only matters if one process mixes slow and fast types, and pools already avoid that.
+
+### Deferred / later (decided to postpone, not Phase 1)
+
+These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.
+
+| Item | What is deferred | Consequence in Phase 1 | Revisit when |
+|---|---|---|---|
+| Account recovery under D30 | Any way to recover a forgotten password or an unverified email: no operator reset command, no password reset, no email verification | A user who forgets their password is locked out permanently. Anyone can register an email address that is not theirs and block its real owner. Phase 1 accepts this. | Before real users, or together with the email sender, password reset and OAuth |
+| Trusted proxies and per-email login limit | A setting for how many reverse proxies to trust when reading the client IP, and a login limit per email address | Phase 1 ignores forwarded headers and uses the connection's address. **Behind any proxy or load balancer all users then share one address, so the per-IP login and signup limits do not work as intended** (one user's failures can lock out everyone). Only valid for local development or a single direct connection. Must be stated in the rate limit doc. | Before any deployment behind a proxy or load balancer |
+
+**Other deferred items, by area.** Where the user attached a consequence it is stated; the rest are simply not built yet.
+
+*Accounts and login*
+- Email verification and the email sender (`EmailSender` port, SMTP adapter, mail-catcher container, a resend-email limit, rules for what an unverified user may do). Phase 1 instead: signup accepts any email. Revisit before OAuth providers, password reset or invitations (D30, supersedes D21).
+- Password reset and member invitations (need the email sender).
+- The server-side hardened session design that was discussed (one random hashed token with rotation, reuse detection, idle timeout and absolute lifetime). Phase 1 uses access and refresh JWTs (D32).
+- Idle session timeout, absolute session cap, an "active sessions" view, per-device logout. Phase 1 has only the refresh token lifetime.
+- Password re-entry before creating or revoking an API key.
+- An access-token denylist, to revoke tokens before they expire. Phase 1 accepts the 15-minute window.
+- Token-based CSRF protection. Phase 1 has the minimum: `SameSite` cookies plus an origin check on state-changing requests.
+- OAuth login providers (Google, GitHub) through the `AuthProvider` port. Authlib is the likely candidate.
+- Asymmetric JWT signing and a `kid`. Needed only if other services verify tokens or keys must rotate.
+
+*Jobs and queue*
+- Manual retry of a failed job (`POST /v1/jobs/{id}/retry`), Phase 2, needs its own spec.
+- Failing a job after N failed publishes. Phase 1 logs, counts and alerts on a stuck outbox row.
+- Maximum wait for a type with no workers. Phase 1 only alerts ("queue has messages but no consumers").
+- `LISTEN/NOTIFY` wake-up for the relay. Phase 1 polls on a short interval, so a new job can wait about a second.
+- Priorities on the per-type queues (RabbitMQ priority), part of Phase 2 priorities.
+- Handler version versus `jobs.type_version` mismatch (an old worker running a job made for a newer input schema).
+- A lock-free, overshoot-tolerant submit, only if per-organisation lock contention ever becomes a problem.
+- Phase 2 features: priorities, delayed jobs, cancel, completion webhooks (`webhook_endpoints` and `webhook_deliveries` tables).
+- Per-organisation limit overrides; other queue adapters (Postgres queue, Redis Streams, SQS); external workers; live progress streaming (SSE). The last two are wishlist only.
+- Fair scheduling between organisations inside one job type's queue.
+
+*Files*
+- Multipart upload for very large files. Phase 1 is a single presigned upload up to a size cap.
+- Virus or content scanning of uploads.
+
+*Data and operations*
+- Time partitioning of `jobs`: partition by id range (to verify) and move idempotency into its own table.
+- Organisation and user deletion flow, and erasing personal data. Intended path: disable, purge jobs after retention, then delete.
+- Audit log of user and key actions. Hard to add later without gaps, so it should be decided early even if built later.
+- Billing and usage metering.
+- Postgres row-level security as a second isolation layer. Phase 1 uses application code plus the contract test (A8).
+- Tested down-migrations. Phase 1 uses forward-only migrations (A9).
+
+**Kept in Phase 1 on purpose (so nobody defers them by mistake):** signup creates the user's first organisation; file upload with the `files` table; idempotent submit race handling; logging, metrics and alerts for stuck outbox rows and sweep re-queues; the CSRF minimum; the explicit proxy-header default (documented); the exact active-jobs cap with the advisory lock; the organisation-isolation contract test.
 
 ## 6. Wiring map (how the pieces connect)
 
 ### 6.1 Runtime flow of one job
 
 1. **Client** calls `POST /v1/jobs` with `Authorization: Bearer qfe_...`.
-2. **API** (FastAPI): authenticates the key (prefix lookup, constant-time hash compare), checks revoked and expired and scopes, applies rate limits via Redis (per key, per organisation, active jobs), then validates the payload against the registered job type's input schema.
-3. **API** opens one Postgres transaction: inserts `jobs` (status `queued`, with `trace_id`, `idempotency_key`, `priority`, `run_at`, `cancel_requested`) and an `outbox` row. Commit. Returns `202` with the job id and `X-Trace-Id`.
-4. **Relay** polls for `outbox` rows that are due (`run_at <= now()` and not yet published), publishes them to RabbitMQ with the trace id in the message headers, and marks them published only after RabbitMQ confirms receipt.
-5. **Worker** receives the message, claims the job (lease), sets `running`, writes a `job_attempts` row, runs the registered handler. Heartbeats extend the lease. `report_progress` updates the job row.
-6. **Success:** result (or file reference) saved, status `succeeded`, then the RabbitMQ message is acknowledged.
-7. **Failure (D22):** `PermanentError` marks `failed` and the message goes to the dead-letter queue. Anything else, while attempts remain, sets `retrying` and inserts a **new outbox row** with a later `run_at` (backoff with jitter) in the same transaction; the relay publishes it when due. After `max_attempts` the job is `failed`. All worker writes after the claim must match the job's lease token. If a lease expires, the `maintenance` container's lease recovery does the same (fail the job if attempts are used up, otherwise requeue through a new outbox row).
+2. **API** (FastAPI): authenticates the key (prefix lookup, constant-time hash compare), checks revoked and expired and scopes, applies the Redis request-rate limits (per key, per organisation), then validates the payload against the registered job type's input schema.
+3. **API** opens one Postgres transaction: takes the organisation's advisory lock; checks the idempotency key; checks each `FileRef` in the payload (belongs to the organisation, exists in storage); counts active jobs up to the cap; inserts `jobs` (status `queued`, with `trace_id`, `idempotency_key`, `run_at = now()`), `job_files` and an `outbox` row (`reason = submit`, `routing_key` = job type). Commit. Returns `202` with the job id and `X-Trace-Id`.
+4. **Relay** polls for `outbox` rows that are due (`run_at <= now()` and not yet published), publishes each to the queue for its job type with the trace id in the message headers (mandatory flag plus publisher confirms), and marks it published only after a clean confirm. An unroutable message counts as a failed publish.
+5. **Worker** (in a pool whose `WORKER_JOB_TYPES` includes the type) receives the message and tries the **claim** (D23): one transaction that sets `running`, takes a lease and a lease token, bumps `attempts`, and writes a `job_attempts` row, only if the job is still waiting and `run_at <= now()`. Claim succeeded: commit, **ack**, run the handler. Claim refused: ack and log. Heartbeats extend the lease. `report_progress` updates the job row.
+6. **Success:** one lease-token-guarded transaction saves the result (or result file id) and sets `succeeded`.
+7. **Failure (D22):** `PermanentError` marks `failed` and nothing else happens (no dead-letter queue, D25). Anything else, while attempts remain, sets `retrying` and inserts a **new outbox row** with a later `run_at` (backoff with jitter) in the same transaction; the relay publishes it when due. After `max_attempts` the job is `failed`. All worker writes after the claim must match the job's lease token. If a lease expires, the `maintenance` container's lease recovery does the same (fail the job if attempts are used up, otherwise requeue through a new outbox row).
 8. **Client** polls `GET /v1/jobs/{id}`.
 
 ### 6.2 Where the trace id travels
@@ -338,11 +515,12 @@ HTTP header (`traceparent` in, `X-Trace-Id` out) → API logs → `jobs.trace_id
 - A single wiring (composition) module reads configuration and chooses the adapter for each port. Replacing a technology means writing one new adapter and changing configuration.
 - The ports are: `QueueAdapter`, `StorageAdapter`, `RateLimiter`, `AuthProvider`, repositories (`JobRepository` and others), `Clock`, `IdGenerator`.
 - Each port has a **contract test suite**. Every adapter for that port must pass it.
-- `api/`, `worker/` and `relay/` are the three entry points. They share the same image and code, started with different commands.
+- `api/`, `worker/`, `relay/` and `maintenance/` are the four entry points. They share the same image and code, started with different commands.
+- `job_types/` holds light job type definitions (name, version, schemas, retry settings) that the API and relay import. `handlers/` holds the heavy implementations that only workers load (D28 refinement).
 
 ### 6.4 Docker Compose services
 
-`api`, `worker`, `relay`, `maintenance` (D19), `frontend`, `postgres` (18), `rabbitmq`, `redis`, `storage` (SeaweedFS, D20), a mail catcher for development if Q15 is approved, `otel-collector`, `tempo`, `loki`, `prometheus`, `grafana`. The observability set can be switched off for light local work.
+`api`, `worker` (one or more pools, each with `WORKER_JOB_TYPES` and its own concurrency, D35), `relay`, `maintenance` (D19, D27), `frontend`, `postgres` (18), `rabbitmq` (one queue per job type), `redis`, `storage` (SeaweedFS, D20), `otel-collector`, `tempo`, `loki`, `prometheus`, `grafana`. The observability set can be switched off for light local work.
 
 ### 6.5 Configuration rules
 
@@ -364,14 +542,20 @@ These were quick searches, not benchmarks. Treat the numbers as rough guidance. 
 | FastAPI stack | FastAPI with SQLAlchemy 2 (async), asyncpg and Alembic is a well-established combination. FastAPI supports Python 3.13. The search did not return OpenTelemetry-specific information. | General results (leapcell.io, oneuptime.com and others) |
 | UUIDv7 in Postgres 18 | `uuidv7()` is built in. Time-ordered values avoid the page-split problem of UUIDv4. Performance on par with identity columns; 16 bytes versus 8. | https://www.credativ.de/en/blog/postgresql-en/a-deeper-look-at-old-uuidv4-vs-new-uuidv7-in-postgresql-18/ , https://betterstack.com/community/guides/databases/postgresql-18-uuid/ , https://neon.com/postgresql/18/uuidv7-support |
 | UUIDv7 in Python | `uuid.uuid7()` was added to the standard library in Python 3.14, not 3.12. | https://blog.openreplay.com/uuid-v4-vs-v7/ and https://forum.djangoproject.com/t/how-to-use-uuidv7-in-python-django-and-postgresql/43474 |
+| MinIO status | Stopped shipping Docker images in October 2025, maintenance mode on 2025-12-03, marked no longer maintained on 2026-02-12, repository archived on 2026-04-25. Alternatives: SeaweedFS (Apache 2.0), RustFS (Apache 2.0, newer), Garage (AGPL). | https://pinggy.io/blog/minio_archived_self_hosted_s3_alternatives/ and https://syncopio.com/blog/minio-maintenance-mode/ |
+| RabbitMQ ack timeout | A consumer that holds a delivery unacked longer than `consumer_timeout` (default 30 minutes) has its channel closed with PRECONDITION_FAILED. | https://www.netdata.cloud/guides/rabbitmq/rabbitmq-consumer-timeout/ |
+| RabbitMQ publisher confirms and unroutable messages | With the mandatory flag and confirms on, an unroutable message is returned (`basic.return`) before the broker confirms; a confirm alone only says the broker accepted the publish, not that a queue received it. | https://www.netdata.cloud/guides/rabbitmq/rabbitmq-publisher-confirms/ |
+| One queue per task type | A common pattern: one queue per task type bound to a direct exchange; workers subscribe to the queues for the types they support, so slow jobs in one queue do not block fast jobs in another. | https://lists.rabbitmq.com/pipermail/rabbitmq-discuss/2009-April/003381.html |
+| Partitioned tables | Unique and primary key constraints must include all partition key columns; foreign keys can reference partitioned tables since PostgreSQL 12; time-ordered UUIDv7 can serve as a partition key. | https://oneuptime.com/blog/post/2026-08-13-postgresql-mysql-unique-keys-include-partition-key/markdown and https://www.postgresql.org/about/featurematrix/detail/foreign-key-references-for-partitioned-tables |
 
 ## 8. Roadmap and wishlist (agreed shape)
 
 | Phase | Scope |
 |---|---|
 | **0, Foundation** | Repo layout, Compose stack, startup config validation, observability skeleton, CI, docs check |
-| **1, Core** | Organisations, signup and login, API keys and their Next.js pages, submit job, status, result, worker, retries and dead-letter, rate limiting (all four limits) with its docs, `echo` handler plus one real sample handler, end-to-end flows, API docs |
-| **2** | Priorities, delayed jobs, cancel, completion webhooks |
+| **1, Core** | Organisations, signup (creates the first organisation) and login with access and refresh tokens, API keys and their Next.js pages, file upload, submit job, job list, status, attempts, result, worker pools, retries, the safety-net sweep, rate limiting (all four limits) with its docs, `echo` handler plus one real sample handler that uses files and progress, end-to-end flows, API docs |
+| **2** | Priorities, delayed jobs, cancel, completion webhooks, manual retry of a failed job |
+| **Deferred** | See "Deferred / later" in section 5 |
 | **Wishlist** | OAuth providers, other queue adapters (Postgres, Redis), per-organisation limit overrides, time partitioning of `jobs`, external workers, SSE (D11) |
 
 None of these are in `TODO.md` yet. They go there only after the user approves the task inventory (Module 7).
@@ -384,6 +568,10 @@ None of these are in `TODO.md` yet. They go there only after the user approves t
 - **One organisation can starve the others.** I flagged it; the user escalated rate limiting into Phase 1.
 - **The Python version changes with UUIDv7.** I said openly that my earlier idea of pinning 3.12 no longer holds if we want app-side `uuid7`.
 - **Local Python is an alpha build.** Do not use it as the project's Python.
+- **Separate queues do not isolate workloads by themselves.** I pointed out that D23's shared concurrency across queues would let a flood of slow jobs fill every worker; dedicated pools (D35) fix it. The user had already agreed per-type queues; the pool setting was the missing half.
+- **Sweep with a fixed wait could flood a backlog.** The user's pack adopted the growing wait.
+- **No account recovery in Phase 1 (D30) and per-IP limits behind a proxy.** I flagged both consequences; the user chose to log and defer them.
+- **Pack gaps I closed as refinements:** file upload (`available` rule, typed `FileRef`, size enforcement, `job_files`), lock order at submit, light job type definitions, and the wording of what a worker holds while waiting for concurrency.
 
 ## 10. Open items
 
@@ -395,14 +583,19 @@ Each has context so it can be settled without re-discovery.
 | V1 | Do FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js support the chosen Python and Node versions? | Never checked. Search only gave general support statements. | Check each on PyPI and with context7 (CLAUDE.md Module 3) before any pin. |
 | V2 | Does the `postgres:18` Docker image tag exist and work for our needs? | Not checked. | Check on Docker Hub before the Compose file. |
 | V3 | Python 3.14 or let Postgres generate every id | Depends on V1. | Pin 3.14 only if the whole stack supports it; otherwise Postgres-generated ids. |
-| R1 | Default values for the four rate limits | User has not given numbers. Needs a conversation about expected traffic. | Pick conservative defaults, configurable by env, and document them. |
+| R1 | Default values for the rate limits and every other tuning setting (lease length, heartbeat interval, worker concurrency, wait before handing back an unstarted message, sweep wait and cap, sweep batch size, retry delays, active-jobs cap, presigned URL lifetime, file size cap, pending-file expiry, retention, payload and result caps, token lifetimes) | User has not given numbers. Needs expected traffic. Tuning values may have code defaults (Module 4). | Settle in Phase 0 or the first spec. Pick conservative defaults, configurable by env, and document them. |
 | H1 | Which real sample handler ships in Phase 1 (besides `echo`) | Not discussed. | Something small and dependency-light that exercises files and progress, to prove the contract. Ask the user. |
-| DB1 | `docs/DATABASE.md` assumptions A1 to A9 (text+CHECK instead of ENUM, server-side sessions, three roles, SHA-256 for API keys, active-jobs quota counted in Postgres instead of Redis, small quota overshoot accepted, no partitioning in Phase 1, tenant isolation in app code rather than row-level security, no down-migrations) | The user asked for the database plan but has not reviewed it. These were my choices. | Review one by one. A5 changes `ARCHITECTURE.md` section 9 if accepted (Redis keeps only the three request-rate limits). |
-| ~~Q14~~ | **ANSWERED, approved as D22.** Original question: requeue design: new outbox row per retry or recovery with `run_at` controlling the delay (reviewer's and my recommendation), versus keeping RabbitMQ delay queues. Changes D15 and `ARCHITECTURE.md` section 11. | The user asked for a detailed explanation first. | Recommend outbox rows with `run_at`. Waiting for the user's answer. |
-| Q15 | How does the system send verification emails (new service)? | Email verification is in Phase 1 (D21) but the architecture has no mail service. | `EmailSender` port, SMTP adapter, and a mail catcher container for dev and tests. Needs approval. |
-| Q16 | Where does a user upload input files (the upload endpoint)? | Presigned URLs are mentioned but no endpoint is designed. OCR flows depend on it. | Design in Phase 1: an endpoint that returns a presigned upload URL and a file reference. |
-| DB2 | Audit log and billing or usage metering | Not discussed. Likely wanted for a real-world platform. | Ask the user whether an audit log belongs in Phase 1. |
-| T1 | Task inventory for `TODO.md` | The user has not yet reviewed `docs/ARCHITECTURE.md`. | Present the inventory after architecture approval. |
+| ~~DB1~~ | **CLOSED.** Assumptions A1 to A9 settled in D29 and D34. | | |
+| ~~Q14~~ | **ANSWERED, approved as D22.** | | |
+| ~~Q15~~ | **CLOSED, deferred.** Email verification and the email sender are out of Phase 1 (D30). | | |
+| ~~Q16~~ | **ANSWERED, D31.** File upload is in Phase 1. | | |
+| V4 | Verify before pinning: SeaweedFS presigned PUT and GET, size conditions on upload, lifecycle rules (D20, D31) | Not checked. | Phase 0. |
+| V5 | Verify: RabbitMQ unroutable-message behaviour with the chosen client library (the broker behaviour itself is confirmed, section 7) | Library not chosen. | Phase 0. |
+| V6 | Verify: a transaction-level advisory lock with PgBouncer transaction pooling, and whether PgBouncer is needed at all (D29) | Not checked. | Phase 0. |
+| V7 | Verify: PyJWT and pwdlib versions and Python support (D33). Not added until approved (Module 5). | Not checked. | Phase 0. |
+| O1 | Does the access token need organisation switching when a user belongs to several organisations? | Phase 1 signup creates one organisation, so not needed yet. | Decide when invitations arrive. |
+| DB2 | Audit log and billing or usage metering | Deferred (listed in "Deferred / later"). An audit log is hard to add later without gaps. | Decide early even if built later. |
+| T1 | Task inventory for `TODO.md` | The user has not yet approved the rewritten `ARCHITECTURE.md` and `DATABASE.md`. | Present the inventory after the user approves both docs. |
 
 ## 11. Assumptions made (not confirmed by the user)
 
@@ -412,7 +605,8 @@ These are in `docs/ARCHITECTURE.md` and should be challenged if wrong:
 - Pydantic for handler schemas (comes with FastAPI).
 - A `/v1` URL prefix for the API.
 - Job submit returns `202 Accepted`.
-- Scopes named `jobs:read` and `jobs:write`.
+- Scopes named `jobs:read`, `jobs:write`, `files:read` and `files:write`.
+- `/v1/files`, `/v1/jobs`, `/v1/jobs/{id}`, `/v1/jobs/{id}/attempts` and `/v1/job-types` as endpoint paths (the first four come from the decision pack; `/v1/job-types` is mine).
 - The observability stack names (Tempo, Loki, Prometheus, Grafana) were approved as part of Section 2, but their exact images and versions are not chosen.
 - The API key prefix format `qfe_` (short for queue-for-everything) is a placeholder.
 
@@ -424,7 +618,20 @@ These are in `docs/ARCHITECTURE.md` and should be challenged if wrong:
 - **Lease and heartbeat:** a worker's time-limited claim on a job, renewed regularly while it works. If the worker dies, the claim runs out and the job is handed to another worker.
 - **At-least-once delivery:** a job may run more than once, but is never silently lost. So handlers must be safe to repeat.
 - **Idempotent:** doing it twice has the same effect as doing it once.
-- **Dead-letter queue:** where a message goes after all retries fail, so people can inspect it.
+- **Dead-letter queue:** where a message would go after all retries fail. **Not used in this project** (D25); failures are read from the database.
+- **Claim:** the worker's database update "this job is mine". It only works if the job is still waiting and its `run_at` has passed.
+- **Lease:** the time-limited ownership written at claim time.
+- **Lease token:** a random code written at claim time. Heartbeat, finish, retry and fail writes must present it, so a worker that lost its lease cannot overwrite a newer attempt.
+- **Heartbeat:** the worker extending its lease while it works.
+- **Recovery:** the `maintenance` container handling jobs whose lease ran out.
+- **Ack:** telling RabbitMQ to forget a message. This project acks right after the claim (D23).
+- **Sweep:** the safety-net check in `maintenance` that re-queues jobs that are waiting with no message on the way (D27).
+- **Concurrency:** how many jobs one worker process runs at the same time. Set per worker pool (D35). (I earlier called this a "slot"; that word is not used any more.)
+- **Worker pool:** a group of worker containers serving the same job types, set with `WORKER_JOB_TYPES`.
+- **Per-type queue:** one RabbitMQ queue for each job type (D28).
+- **Mandatory publish:** publishing with a flag that makes RabbitMQ return a message it cannot route to any queue, instead of silently dropping it.
+- **Presigned URL:** a temporary link that lets a client upload or download one file directly to or from storage.
+- **Job type definition vs handler:** the definition is the light description of a job type (name, schemas, retry settings); the handler is the code that does the work.
 - **Contract test:** one test suite that every implementation of a port must pass, proving they behave the same.
 - **UUIDv7:** a unique id that starts with a timestamp, so new ids sort in creation order (good for database indexes).
 - **Fail open / fail closed:** when a safety check breaks, either allow the action (open) or block it (closed).
