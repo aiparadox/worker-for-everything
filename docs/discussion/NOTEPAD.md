@@ -2,7 +2,7 @@
 
 This file is the full memory of the design discussion. A new session should be able to read only this file (plus `CLAUDE.md`, `docs/ARCHITECTURE.md` and `docs/DATABASE.md`) and continue without guessing what was decided, why, what else was considered, or how the parts connect.
 
-Last updated: 2026-10-09 · Session: `qfe-8-10-2026`
+Last updated: 2026-10-10 · Session: `qfe-8-10-2026`
 
 How to read it:
 
@@ -20,12 +20,12 @@ Plain English is required for explanations to the user (`CLAUDE.md`, Module 10).
 | Item | State |
 |---|---|
 | Phase of work | Design. No product code, no scaffolding, no dependencies installed. |
-| Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D35 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 to match all of them. |
+| Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D40 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 and corrected on 2026-10-10 to match all of them. |
 | Waiting on | The user's review and approval of the rewritten `ARCHITECTURE.md` and `DATABASE.md`. Nothing else is blocking: the remaining open items (section 10) are Phase 0 verifications and tuning defaults. |
-| Docs state | Both design docs match D19 to D35 as of 2026-10-09. They are drafts until the user approves them. **The 2026-10-09 rewrite is not committed yet.** |
+| Docs state | Both design docs match D19 to D40 as of 2026-10-10. They are drafts until the user approves them. Not pushed to GitHub from this session (no SSH access); the user pushes. |
 | Next step | After the user approves both docs: present the **task inventory** (Phase 0, Phase 1, Phase 2, deferred list, verification tasks) in plain English. Only after approval, write items to `TODO.md` as `[ ]`. |
 | After that | Per item: verify the code or setup, write a short spec in `docs/specs/`, get approval, then implement on the checked-out branch. |
-| Commits | History was rewritten on 2026-10-08 to remove `CLAUDE.md` (user chose option C1). Current local commits: `0544977` initial commit (notepad), `db790a4` architecture doc and notepad update. Branch: `master`. The old hashes `d6c8a98` and `80f32a0` no longer exist locally. **The user says they ran the force-push themselves** (the Claude session cannot authenticate to GitHub: `Permission denied (publickey)`), so GitHub should now match; not verified from this session. `CLAUDE.md` stays on disk and is ignored through `.git/info/exclude` (local only). |
+| Commits | History was rewritten on 2026-10-08 to remove `CLAUDE.md` (user chose option C1). Local commits: `0544977` initial commit (notepad), `db790a4` architecture doc, `bcc58ce` database plan and updates, `536136f` rewrite for D23 to D35, then the D36 to D40 commit (see `git log`). Branch: `master`. The old hashes `d6c8a98` and `80f32a0` no longer exist locally. **The user says they ran the force-push themselves** (the Claude session cannot authenticate to GitHub: `Permission denied (publickey)`), so GitHub should now match; not verified from this session. `CLAUDE.md` stays on disk and is ignored through `.git/info/exclude` (local only). |
 | Not created yet | `TODO.md`, `docs/specs/`, `docs/adr/`, `docs/apis/`, any code. |
 
 ### Working rules that shaped this session (from `CLAUDE.md`)
@@ -91,6 +91,8 @@ Everything happened on 2026-10-08. Each row is one exchange.
 | 15 | User pasted a review from another session. I checked it against the files and searched for the MinIO claim and the partitioning claim. I asked four questions. | Chores: separate `maintenance` container (D19). Storage: **SeaweedFS** (D20). Account scope: **email verification only** in Phase 1, reset and invites deferred (D21). On the requeue design the user asked for a **detailed explanation** before deciding (Q14). | MinIO is archived, which changed D6. The review found six real holes in DATABASE.md. |
 | 16 | User asked about "ack after claim" and requeues; I asked four questions (routing, sweep, failed-job re-run, A5); the user interrupted and pasted a large decision pack from several analysis sessions. I analysed it and found eight problems (isolation claim, in-flight messages, no account recovery, proxies, file upload gaps, handler imports, sweep count, lock order). | User answered: account recovery **log and defer**, trusted proxy **log and defer**. Asked me to explain worker pools and items 2, 5 and 8. | See D23 to D35 and "Deferred / later". |
 | 17 | User was confused by my word "slot"; I explained it means concurrency. User clarified that concurrency varies per pool (OCR 1, email sending tuned by load testing). | Agreed: dedicated pools through `WORKER_JOB_TYPES`, concurrency per pool, no per-type cap (D35). I then rewrote `ARCHITECTURE.md` and `DATABASE.md` for D19 to D35 and this notepad. | Docs are consistent with the decision pack. |
+| 18 | User pasted a second analysis of the committed docs (four problems and several smaller points). I checked each against the files, confirmed all four, and explained three of them on request: the lock held during storage calls, a used refresh token shown again from a second tab, and what the sweep is. The user also asked whether duplicate sweep messages could run a job twice, and whether the outbox keeps finished jobs. | **Apply all recommendations** (D36 to D40), including `family_expires_at` and `GET /v1/files/{id}`. `WORKER_JOB_TYPES` required with `*` ("ok"). | Four real flaws fixed in my own docs. |
+| 19 | Docs updated for D36 to D40 and committed. | See the Commits row in section 1. | The notepad's state rows are current again. |
 
 ## 5. Decisions in detail
 
@@ -364,6 +366,8 @@ The user ran several analysis sessions and pasted the resulting decisions. I che
 
 ### D27. Safety-net sweep in `maintenance`
 
+> **Amended by D38.** The sweep's history (`sweep_count`, `last_enqueued_at`) now lives on the `jobs` row instead of being counted from old outbox rows, because outbox cleanup would erase that memory.
+
 - **Decided by:** the user. Needed because after an early ack, a message acked without a claim leaves a job with no owner and no message, and recovery only looks at `running` jobs.
 - **Finds:** jobs with `status IN ('queued','retrying')`, `run_at < now() - wait`, no unpublished outbox row, and a newest outbox row older than `wait`.
 - **Growing wait:** 5, 10, 20, 40 minutes, capped at 1 hour, each time the same job is re-queued by the sweep. A fixed wait could add a duplicate message for every waiting job every few minutes during a deep backlog, making the backlog worse.
@@ -387,6 +391,8 @@ The user ran several analysis sessions and pasted the resulting decisions. I che
 
 ### D29. Active-jobs cap counted in Postgres, exact (A5 and A6)
 
+> **Amended by D36.** File checks against storage now happen before the transaction, so the lock is never held during a network call. The order inside the lock is: idempotency key, re-read and lock the file rows, capped count, insert.
+
 - **Decided by:** the user. Supersedes the Redis counter in D17 for this one limit, and revises D18.
 - **Capped count** inside the submit transaction: `SELECT count(*) FROM (SELECT 1 FROM jobs WHERE organisation_id=:org AND status IN ('queued','retrying','running') LIMIT :cap+1)`. Cost never grows past the cap. Keep the cap in the low thousands.
 - **Exact (A6 amended):** submit takes a per-organisation transaction-level advisory lock, then runs the capped count and the insert. Submits for different organisations do not block each other.
@@ -405,6 +411,8 @@ The user ran several analysis sessions and pasted the resulting decisions. I che
 
 ### D31. File upload in Phase 1
 
+> **Amended by D36 and D40.** The storage check happens before the transaction (D36). `job_files` now covers input files only, and `jobs.result_file_id` links the result file. `GET /v1/files/{id}` was added so the `files:read` scope has an endpoint (D40).
+
 - **Decided by:** the user. Flow: (a) `POST /v1/files` with file name, size and content type returns a `file_id` and a presigned upload URL; (b) the client uploads straight to storage; (c) the job payload carries the `file_id`; (d) at submit the API checks that the file belongs to the organisation and exists in storage (HEAD), and rejects a bad reference at once; (e) large results are stored as files, and `GET /v1/jobs/{id}` returns a short-lived download URL.
 - **`files` table:** id, organisation_id, kind (`input`/`result`), server-generated `storage_key` namespaced by organisation, display name, content type, declared size, status (`pending`/`available`), created_at, expires_at (for unused pending files). `jobs.result_ref` becomes `jobs.result_file_id` referencing `files`.
 - Single presigned upload up to a size cap in Phase 1. Multipart is later.
@@ -419,6 +427,8 @@ The user ran several analysis sessions and pasted the resulting decisions. I che
 - Each endpoint gets a file under `docs/apis/` listing its rate limits. Verify in Phase 0: SeaweedFS presigned PUT and GET, size conditions, lifecycle rules.
 
 ### D32. Login uses access and refresh JWTs
+
+> **Amended by D37 and D40.** A short reuse window stops two browser tabs from logging the user out, and `family_expires_at` gives an absolute login lifetime.
 
 - **Decided by:** the user. Replaces the sessions table and assumption A2, and replaces the "browser session cookie" wording in D14.
 - **Access token:** about 15 minutes, signed (PyJWT), held in browser memory, sent as `Authorization: Bearer`. Claims: `iss`, `aud`, `sub`, `exp`, `iat`, `jti`, `org_id`, `role`, `fam`.
@@ -438,10 +448,53 @@ The user ran several analysis sessions and pasted the resulting decisions. I che
 
 ### D35. Worker pools and concurrency
 
+> **Amended by D39.** `WORKER_JOB_TYPES` is now a required setting (`*` means all types), not an optional one with a silent fallback. The "if unset, serves every type" wording below is history.
+
 - **Decided by:** the user, after a discussion where I over-used the word "slot" (it just means concurrency). Dedicated pools come from a setting, not automatically from per-type queues.
 - `WORKER_JOB_TYPES` lists the job types a worker container serves. It consumes only those queues. If unset, the worker serves every type it has code for, and logs that choice. Startup fails if a listed type does not exist. Run separate containers for separate pools (for example OCR workers on bigger machines).
 - **Concurrency is set per pool:** OCR stays at 1 (one heavy job per process; scale by adding containers). Email sending might run higher, tuned after load testing.
 - **No per-type cap inside one worker.** It was considered and dropped: it only matters if one process mixes slow and fast types, and pools already avoid that.
+
+## Review round 2 (2026-10-10): D36 to D40
+
+The user ran another analysis session over the committed docs and pasted its findings. I checked each point against the files. All four problems were real and were fixed in `ARCHITECTURE.md` and `DATABASE.md`. The user asked for explanations of three of them first (lock during storage calls, the reuse of a used refresh token, and the sweep and cleanup), then said to apply my recommendations, including both open calls.
+
+### D36. Storage checks happen before the submit transaction (amends D29 and D31)
+
+- **Problem found:** `DATABASE.md` put the storage HEAD checks inside the organisation lock. With 3 files at 200 ms each, an organisation would hold the lock for about 0.6 seconds, limiting it to roughly 2 submits per second, and every waiting submit would tie up a database connection. `ARCHITECTURE.md` already had the better order, so the two docs disagreed.
+- **Fix:** check each file against storage and mark it `available` **before** opening the transaction. Inside the transaction, with the lock held: check the idempotency key; re-read the file rows from the database (still `available`, same organisation, not expired) and lock them with `FOR SHARE` so the cleanup job skips them; capped count; insert. The lock lasts a few milliseconds.
+- **Accepted edge case:** a file that vanishes from storage between the check and a worker reading it fails that job with a permanent error. Rare.
+
+### D37. Refresh reuse window (amends D32)
+
+- **Problem found:** a used refresh token shown again revokes the whole family. Two browser tabs, or a reload during a refresh, send the same token within moments, so the second request looks like theft and logs the user out for no reason. The earlier session design had a grace period; the JWT design lost it.
+- **Meaning of "used":** not time-expired. Refresh tokens are one-time: each refresh swaps the token for a new one and marks the old one used.
+- **Fix:** a short reuse window (tuning value, for example 10 to 30 seconds). A used token shown again inside the window gets a distinct "already refreshed" error and nothing is revoked; the browser cookie already holds the new token, so the frontend retries once. The frontend also lets only one tab refresh at a time. A used token shown again after the window revokes the whole family. Test added.
+- **Trade-off accepted:** a thief replaying the token inside the window is rejected but not punished.
+
+### D38. Sweep history lives on the job (amends D27)
+
+- **What the sweep is, in plain terms:** a job in Postgres can end up waiting with no message on the way (RabbitMQ lost messages, a bug acked a message without claiming, a message was dropped by a misconfiguration). Nothing would ever run it, and recovery only watches `running` jobs. The sweep, in `maintenance`, periodically finds such jobs and sends a fresh message. It cannot tell a lost message from a slow queue, so it waits longer each time (5, 10, 20, 40 minutes, up to 1 hour) to avoid adding duplicates to an already busy queue.
+- **Problem found:** the plan counted earlier `reason='sweep'` outbox rows to know how long to wait, but the cleanup deletes published outbox rows after hours to a day. After a long wait the sweep forgot its history, went back to 5 minutes, and flooded the queue with duplicates.
+- **Fix:** two fields on `jobs`, updated in the same transaction as every outbox insert: `sweep_count` (reset to 0 at claim) and `last_enqueued_at`. The sweep finds jobs with `status IN ('queued','retrying')`, `run_at < now() - wait`, `last_enqueued_at < now() - wait`, and no unpublished outbox row, where `wait = 5 min * 2^sweep_count`, capped at 1 hour. Outbox cleanup can delete old rows freely. This also removes the earlier ambiguity about "since its last claim".
+- **An outbox row is a message, not a job.** "Done" for an outbox row means published (sent and confirmed), not that the job finished. Published rows are deleted after hours to a day whatever the job's state.
+- **Why duplicate messages are harmless:** the claim is one atomic database update that only succeeds if the job is still `queued` or `retrying` and `run_at` has passed. Only one worker wins; the others change zero rows, ack and log. A slow-but-alive worker whose lease expired can still lead to a rare double execution of the handler, which is why handlers must be safe to run twice.
+- **Alternative considered:** keep a job's outbox rows until the job is final. Rejected: a long-stuck job would keep a growing pile of rows, and cleanup would need to join against `jobs`.
+
+### D39. `WORKER_JOB_TYPES` is required (amends D35)
+
+- **Decided by:** the user ("ok"). A missing value used to fall back to "serve every type" with a log line. That would let a production OCR pool quietly start serving email jobs and undo the isolation. Module 4 prefers failing at startup.
+- **Now:** the setting is required. `*` means all types the worker has code for. Fine in development, a conscious choice elsewhere. Startup also fails if a listed type does not exist.
+
+### D40. Smaller fixes
+
+- **Refresh and logout rate limits:** refresh has its own limit, separate from login, and fails **open** on a Redis outage. Under the login limit (fail closed) a Redis outage would block refreshes and log everyone out. Logout gets a light limit.
+- **Same-site deployment rule:** `SameSite=Strict` means frontend and API must be on the same site (for example `app.example.com` and `api.example.com`; different ports on `localhost` are fine). Different registrable domains break login. Alternative: Next.js proxies API calls on its own origin.
+- **Absolute login lifetime:** added `refresh_tokens.family_expires_at`, set at login and never extended by rotation. (The idle timeout stays deferred.) This was one of the two calls the user left open; I recommended adding it and the user told me to go ahead.
+- **Recovery uses the backoff function:** a job that crashes its worker is not retried at once.
+- **One link per file:** `jobs.result_file_id` links result files; `job_files` is for input files only (the `role` column is gone). Both are real foreign keys, so the database refuses to delete a file that is still used.
+- **`GET /v1/files/{id}` added** (status and a short-lived download link, needs `files:read`), so the `files:read` scope has an endpoint. This was the other open call; same outcome.
+- **Wording:** "four levels of tests plus a docs check"; `last_updated` dates; this notepad's stale state rows.
 
 ### Deferred / later (decided to postpone, not Phase 1)
 
@@ -458,7 +511,7 @@ These were raised during review of the decision pack (2026-10-09). The user chos
 - Email verification and the email sender (`EmailSender` port, SMTP adapter, mail-catcher container, a resend-email limit, rules for what an unverified user may do). Phase 1 instead: signup accepts any email. Revisit before OAuth providers, password reset or invitations (D30, supersedes D21).
 - Password reset and member invitations (need the email sender).
 - The server-side hardened session design that was discussed (one random hashed token with rotation, reuse detection, idle timeout and absolute lifetime). Phase 1 uses access and refresh JWTs (D32).
-- Idle session timeout, absolute session cap, an "active sessions" view, per-device logout. Phase 1 has only the refresh token lifetime.
+- Idle session timeout, an "active sessions" view, per-device logout. (The absolute login lifetime is built in Phase 1 through `refresh_tokens.family_expires_at`, D40.)
 - Password re-entry before creating or revoking an API key.
 - An access-token denylist, to revoke tokens before they expire. Phase 1 accepts the 15-minute window.
 - Token-based CSRF protection. Phase 1 has the minimum: `SameSite` cookies plus an origin check on state-changing requests.
@@ -497,7 +550,7 @@ These were raised during review of the decision pack (2026-10-09). The user chos
 
 1. **Client** calls `POST /v1/jobs` with `Authorization: Bearer qfe_...`.
 2. **API** (FastAPI): authenticates the key (prefix lookup, constant-time hash compare), checks revoked and expired and scopes, applies the Redis request-rate limits (per key, per organisation), then validates the payload against the registered job type's input schema.
-3. **API** opens one Postgres transaction: takes the organisation's advisory lock; checks the idempotency key; checks each `FileRef` in the payload (belongs to the organisation, exists in storage); counts active jobs up to the cap; inserts `jobs` (status `queued`, with `trace_id`, `idempotency_key`, `run_at = now()`), `job_files` and an `outbox` row (`reason = submit`, `routing_key` = job type). Commit. Returns `202` with the job id and `X-Trace-Id`.
+3. **API** first checks each `FileRef` in the payload against storage (HEAD) and marks found files `available`, with no lock held (D36). Then it opens one Postgres transaction: takes the organisation's advisory lock; checks the idempotency key; re-reads and locks the file rows; counts active jobs up to the cap; inserts `jobs` (status `queued`, with `trace_id`, `idempotency_key`, `run_at = now()`), `job_files` and an `outbox` row (`reason = submit`, `routing_key` = job type). Commit. Returns `202` with the job id and `X-Trace-Id`.
 4. **Relay** polls for `outbox` rows that are due (`run_at <= now()` and not yet published), publishes each to the queue for its job type with the trace id in the message headers (mandatory flag plus publisher confirms), and marks it published only after a clean confirm. An unroutable message counts as a failed publish.
 5. **Worker** (in a pool whose `WORKER_JOB_TYPES` includes the type) receives the message and tries the **claim** (D23): one transaction that sets `running`, takes a lease and a lease token, bumps `attempts`, and writes a `job_attempts` row, only if the job is still waiting and `run_at <= now()`. Claim succeeded: commit, **ack**, run the handler. Claim refused: ack and log. Heartbeats extend the lease. `report_progress` updates the job row.
 6. **Success:** one lease-token-guarded transaction saves the result (or result file id) and sets `succeeded`.
@@ -583,7 +636,7 @@ Each has context so it can be settled without re-discovery.
 | V1 | Do FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js support the chosen Python and Node versions? | Never checked. Search only gave general support statements. | Check each on PyPI and with context7 (CLAUDE.md Module 3) before any pin. |
 | V2 | Does the `postgres:18` Docker image tag exist and work for our needs? | Not checked. | Check on Docker Hub before the Compose file. |
 | V3 | Python 3.14 or let Postgres generate every id | Depends on V1. | Pin 3.14 only if the whole stack supports it; otherwise Postgres-generated ids. |
-| R1 | Default values for the rate limits and every other tuning setting (lease length, heartbeat interval, worker concurrency, wait before handing back an unstarted message, sweep wait and cap, sweep batch size, retry delays, active-jobs cap, presigned URL lifetime, file size cap, pending-file expiry, retention, payload and result caps, token lifetimes) | User has not given numbers. Needs expected traffic. Tuning values may have code defaults (Module 4). | Settle in Phase 0 or the first spec. Pick conservative defaults, configurable by env, and document them. |
+| R1 | Default values for the rate limits and every other tuning setting (lease length, heartbeat interval, worker concurrency, wait before handing back an unstarted message, sweep wait and cap, sweep batch size, retry delays, active-jobs cap, presigned URL lifetime, file size cap, pending-file expiry, retention, payload and result caps, token lifetimes, refresh reuse window, absolute login lifetime) | User has not given numbers. Needs expected traffic. Tuning values may have code defaults (Module 4). | Settle in Phase 0 or the first spec. Pick conservative defaults, configurable by env, and document them. |
 | H1 | Which real sample handler ships in Phase 1 (besides `echo`) | Not discussed. | Something small and dependency-light that exercises files and progress, to prove the contract. Ask the user. |
 | ~~DB1~~ | **CLOSED.** Assumptions A1 to A9 settled in D29 and D34. | | |
 | ~~Q14~~ | **ANSWERED, approved as D22.** | | |
@@ -629,6 +682,10 @@ These are in `docs/ARCHITECTURE.md` and should be challenged if wrong:
 - **Concurrency:** how many jobs one worker process runs at the same time. Set per worker pool (D35). (I earlier called this a "slot"; that word is not used any more.)
 - **Worker pool:** a group of worker containers serving the same job types, set with `WORKER_JOB_TYPES`.
 - **Per-type queue:** one RabbitMQ queue for each job type (D28).
+- **Outbox row:** one message waiting to be sent (or already sent) to RabbitMQ. It is not a job. "Done" means published, not that the job finished.
+- **Reuse window:** a short time (for example 20 seconds) in which a refresh token that was already used can be shown again without logging the user out. It covers two browser tabs refreshing at once (D37).
+- **Token family:** all refresh tokens that descend from one login. Revoking the family ends that login.
+- **Family expiry:** the absolute end of a login, set once and never extended by refreshing (D40).
 - **Mandatory publish:** publishing with a flag that makes RabbitMQ return a message it cannot route to any queue, instead of silently dropping it.
 - **Presigned URL:** a temporary link that lets a client upload or download one file directly to or from storage.
 - **Job type definition vs handler:** the definition is the light description of a job type (name, schemas, retry settings); the handler is the code that does the work.

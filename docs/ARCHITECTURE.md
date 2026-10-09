@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **Draft for review** · Last updated: 2026-10-09
+Status: **Draft for review** · Last updated: 2026-10-10
 
 This document describes how the queue server is built and why. Every choice here comes from the design discussion recorded in [`docs/discussion/NOTEPAD.md`](discussion/NOTEPAD.md). Decision numbers (D1, D2, ...) point to that file. Table and column detail is in [`DATABASE.md`](DATABASE.md).
 
@@ -21,7 +21,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 - Every request and every job can be traced across all services with a single trace ID.
 - Multi-organisation from day one, with API keys that users create themselves.
 - Fully runnable from one `docker compose up`.
-- Tested at four levels: unit, integration, adapter contract, end to end.
+- Tested at four levels (unit, integration, adapter contract, end to end), plus a docs check.
 
 **Non-goals (for now)**
 
@@ -50,7 +50,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 | Background chores | Separate `maintenance` container (lease recovery, safety-net sweep, cleanup, purge) | D19, D27 |
 | Retries and delays | New outbox rows with a `run_at` time. No broker delay queues, no dead-letter queue | D22, D24, D25 |
 | Acknowledgement | A worker acks the RabbitMQ message right after its claim is saved | D23 |
-| Worker pools | Each worker container serves the job types in `WORKER_JOB_TYPES`, with its own concurrency | D35 |
+| Worker pools | Each worker container serves the job types in `WORKER_JOB_TYPES` (a required setting, `*` means all types), with its own concurrency | D35, D39 |
 | Phase 1 accounts | Signup and login only. Email verification, password reset and invitations are deferred | D30 |
 
 ## 4. System overview
@@ -107,15 +107,15 @@ A worker is one process. Its **concurrency** is how many jobs it runs at the sam
 - `ocr.extract` runs with concurrency 1 (one heavy job per process). To process more at once, run more containers.
 - Email sending might run at a higher concurrency, tuned after load testing.
 
-`WORKER_JOB_TYPES` lists the job types a pool serves. The worker consumes only those queues. If the setting is unset the worker serves every type it has code for, and logs that choice. Startup fails if a listed type does not exist.
+`WORKER_JOB_TYPES` lists the job types a pool serves. The worker consumes only those queues. The setting is **required**: if it is missing, the worker does not start. The value `*` means "every type this worker has code for". That is fine in development, and a conscious choice anywhere else, so a production OCR pool can never quietly start serving email jobs too (D39). Startup also fails if a listed type does not exist.
 
 Separate queues alone do not stop a flood of slow jobs from using up every worker. Separate **pools** do, so slow and fast job types should run in different pools.
 
 ## 5. Life of a job
 
 1. The client calls `POST /v1/jobs` with an API key.
-2. The API checks the key, scopes and request rate limits, then validates the payload against the job type's input schema. Bad input is rejected here with a clear error. Any file the payload refers to must belong to the organisation and exist in storage.
-3. In **one database transaction** the API takes a per-organisation lock, checks the idempotency key, checks the active-jobs cap, then inserts the `jobs` row (`queued`) and an `outbox` row. Either both exist or neither does.
+2. The API checks the key, scopes and request rate limits, then validates the payload against the job type's input schema. Bad input is rejected here with a clear error. Then, **before any transaction or lock**, the API checks each file the payload refers to: it belongs to the organisation, and a HEAD request to storage finds the object. A found file is marked `available`.
+3. In **one database transaction** the API takes a per-organisation lock, checks the idempotency key, re-reads the file rows from the database (still `available`, same organisation, not expired) and locks them so cleanup skips them, checks the active-jobs cap, then inserts the `jobs` row (`queued`), the `job_files` rows and an `outbox` row. No network call is made while the lock is held (D36), so the lock lasts a few milliseconds. Either everything exists or nothing does.
 4. The relay reads outbox rows that are due (their `run_at` has passed) and publishes each one to the RabbitMQ queue named after the job type. It marks a row published only after RabbitMQ confirms the message was received **and** routed to a queue.
 5. A worker in a pool that serves that type receives the message. It tries to **claim** the job: one transaction that only succeeds if the job is still waiting and its `run_at` has passed. The claim takes a **lease** (a time-limited ownership) and a **lease token** (a random code), sets the job to `running`, and records a `job_attempts` row.
 6. **Claim succeeded:** the transaction commits, the worker **acks** the message, and runs the handler. While it runs, it sends heartbeats that extend the lease.
@@ -191,12 +191,12 @@ All primary keys are **UUIDv7** (D13). They are time-ordered, so inserts land at
 | `organisations` | A tenant. Owns keys, jobs, files and usage. |
 | `users` | A person who can log in. |
 | `auth_identities` | How a user proves who they are: a password now, OAuth providers later (D7). |
-| `refresh_tokens` | One row per refresh token, with a family id, so rotation and reuse detection work (D32). |
+| `refresh_tokens` | One row per refresh token, with a family id and an absolute family expiry, so rotation, reuse detection and a maximum login lifetime work (D32, D37, D40). |
 | `memberships` | User, organisation, role. |
 | `api_keys` | Organisation, name, prefix, secret hash, scopes, created_by, last_used_at, expires_at, revoked_at. |
 | `files` | Uploaded inputs and stored results, referenced by id (D31). |
-| `job_files` | Links a job to the files it uses, so cleanup never removes a file a job still needs. |
-| `jobs` | id, organisation, type, payload (JSON), status, attempts, max_attempts, progress, result or a result file, error, idempotency_key, trace_id, `run_at` (do not run before), lease fields, timestamps. Phase 2 fields `priority` and `cancel_requested` exist from the start. |
+| `job_files` | Links a job to its **input** files, so cleanup never removes a file a job still needs. A result file is linked by `jobs.result_file_id`, so each file has one link (D40). |
+| `jobs` | id, organisation, type, payload (JSON), status, attempts, max_attempts, progress, result or a result file, error, idempotency_key, trace_id, `run_at` (do not run before), lease fields, sweep fields (`sweep_count`, `last_enqueued_at`), timestamps. Phase 2 fields `priority` and `cancel_requested` exist from the start. |
 | `job_attempts` | One row per try: start, end, outcome, error. Shows why a job failed. |
 | `outbox` | Messages waiting to be published to RabbitMQ, each with a `reason` and a `run_at` time. A job gets a new row for its first run and for every retry, recovery or sweep (D22, D27). |
 
@@ -220,10 +220,13 @@ Two kinds of credentials, kept apart on purpose:
 
 - **Access token:** a signed JWT lasting about 15 minutes, held in browser memory. Claims: `iss`, `aud`, `sub`, `exp`, `iat`, `jti`, `org_id`, `role`, `fam`.
 - **Refresh token:** also a signed JWT, in an httpOnly, Secure, `SameSite=Strict` cookie that is sent only to the refresh path. It has its own audience and `typ: refresh`, so the two token types can never be used in place of each other.
-- **Server side:** each refresh token has a row in `refresh_tokens`. Every refresh **rotates** the token. If a token that was already used shows up again, the whole token family is revoked.
+- **Server side:** each refresh token has a row in `refresh_tokens`. Every refresh **rotates** the token: the old one is marked used and a new one is issued.
+- **Reuse window (D37).** Two browser tabs, or a reload during a refresh, can send the same refresh token twice within moments. So a used token shown again **within a short window** (a tuning value, for example 10 to 30 seconds) gets a distinct "already refreshed" error and nothing is revoked. The browser's cookie already holds the new token from the first response, so the frontend retries once and succeeds. The frontend also lets only one tab refresh at a time. A used token shown again **after** the window is treated as theft and the whole token family is revoked.
+- **Absolute lifetime (D40).** Each login sets a `family_expires_at` that is never extended by rotation. After it, refresh is refused and the user logs in again.
 - **Logout** revokes the family. The access token stays valid until it expires (at most about 15 minutes). This is accepted.
 - **API key management** re-reads the user and membership from the database on every call, so a changed role takes effect at once for that sensitive area.
 - The signing secret, issuer and audience are required configuration and fail at startup if missing.
+- **Deployment rule (D40):** `SameSite=Strict` means the frontend and the API must be on the same site (for example `app.example.com` and `api.example.com`; different ports on `localhost` are fine). Frontend and API on different registrable domains would break login. The alternative is to have the Next.js server proxy API calls on its own origin.
 
 **API keys**
 
@@ -251,6 +254,7 @@ Required in Phase 1 (D16, D17). Three request-rate limits live in Redis behind t
 | Requests per organisation | All keys of an organisation together | Creating many keys to get around the key limit | Redis |
 | Login and signup per IP address | Unauthenticated auth endpoints | Password guessing and fake signups | Redis |
 | Active jobs per organisation | Jobs in `queued`, `retrying` or `running` | One organisation filling the queue and starving others | Postgres, counted up to the cap inside the submit transaction |
+| Refresh and logout | Per IP and per user, **separate from login** | Token-refresh abuse | Redis, fails open (D40) |
 
 **Per-IP limits and proxies (known gap).** Phase 1 ignores forwarded headers and uses the connection's address. Behind any proxy or load balancer, all users then share one address, so the per-IP login limit does not work as intended. This is deferred (see the Deferred list in the notepad) and must be stated in `docs/rate-limits.md`. It is only valid for local development or a direct connection.
 
@@ -258,7 +262,7 @@ Required in Phase 1 (D16, D17). Three request-rate limits live in Redis behind t
 
 **When Redis is down** (D18, explicit by design, revised by D29):
 
-- API and organisation request limits **fail open**: requests are allowed, and the system logs an error, increments a metric and raises an alert.
+- API, organisation, refresh and logout request limits **fail open**: requests are allowed, and the system logs an error, increments a metric and raises an alert. Refresh has its own limit, separate from login, so that a Redis outage can never block refreshes and log everyone out.
 - Login and signup limits **fail closed**: requests are rejected, because without limits they are open to abuse.
 - The **active-jobs cap does not depend on Redis**, so it keeps working during a Redis outage.
 
@@ -290,7 +294,7 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 - `PermanentError`: bad input, unsupported file, and similar. Fails at once, no retries.
 - Anything else, including unexpected exceptions and timeouts, is retried until `max_attempts`. This default is deliberate, documented, and logged.
 
-**Retry delay.** One function in `domain/` returns a **duration** with random jitter for a given attempt number and the job type's retry settings. It does not return a timestamp. SQL then writes `run_at = now() + :delay` on the database clock (D24). The default plan (to be confirmed per job type) is 3 retries after the first run (`max_attempts` = 4), with delays of about 10 seconds, 2 minutes and 10 minutes, jitter about ±20%.
+**Retry delay.** One function in `domain/` returns a **duration** with random jitter for a given attempt number and the job type's retry settings. It does not return a timestamp. SQL then writes `run_at = now() + :delay` on the database clock (D24). The default plan (to be confirmed per job type) is 3 retries after the first run (`max_attempts` = 4), with delays of about 10 seconds, 2 minutes and 10 minutes, jitter about ±20%. Lease recovery uses the same function, so a job that crashes its worker (for example by running out of memory) is not retried at once.
 
 ## 11. Reliability and delivery
 
@@ -301,8 +305,8 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 - **Concurrency.** Prefetch no longer limits how many jobs run, because acked messages free their place. A worker consumes only while it has free concurrency and cancels its consumers when it is full. Messages already on their way can still arrive, so a worker may briefly hold **at most one delivered, unclaimed message per queue**. If it cannot start one within a short wait (a tuning value), it nacks it with requeue so another worker can take it. The RabbitMQ consumer timeout stays an explicit setting.
 - **Lease token.** Every heartbeat and final write says `WHERE id = ? AND status = 'running' AND lease_token = ?`. Zero rows updated means the worker lost its lease and must stop. The attempt is recorded as `lease_lost`.
 - **At-least-once.** Nothing is lost, and a job may rarely run twice. The claim refuses a job that is already running, finished, or not yet due, so duplicate messages are harmless. Handlers stay idempotent.
-- **Recovery** (in `maintenance`): finds `running` jobs whose lease expired. If `attempts >= max_attempts` the job is marked `failed`. Otherwise it becomes `retrying` and a new outbox row is inserted. Either way the open attempt is closed as `lease_lost`. A job that crashes every worker therefore fails after `max_attempts`.
-- **Safety-net sweep** (in `maintenance`, D27). After an early ack, a message that was acked without a claim leaves a job with no owner and no message, and recovery only looks at `running` jobs. The sweep finds jobs that are `queued` or `retrying`, whose `run_at` is older than a wait, with no unpublished outbox row, and whose newest outbox row is older than the wait. It inserts a new outbox row (`reason = 'sweep'`). The wait grows each time the same job is swept since its last claim: 5, 10, 20, 40 minutes, capped at 1 hour, so a deep backlog is never flooded with duplicates. Each run handles a bounded number of jobs, one transaction per job, claimed with `SKIP LOCKED`. Every sweep re-queue logs a warning, increments a metric and can alert, because it should be rare and usually means a bug.
+- **Recovery** (in `maintenance`): finds `running` jobs whose lease expired. If `attempts >= max_attempts` the job is marked `failed`. Otherwise it becomes `retrying`, its `run_at` is set to `now()` plus the same backoff delay used for retries, and a new outbox row is inserted. Either way the open attempt is closed as `lease_lost`. A job that crashes every worker therefore fails after `max_attempts`.
+- **Safety-net sweep** (in `maintenance`, D27). After an early ack, a message that was acked without a claim leaves a job with no owner and no message, and recovery only looks at `running` jobs. The sweep finds jobs that are `queued` or `retrying`, whose `run_at` is older than a wait, whose `last_enqueued_at` is older than the wait, and that have no unpublished outbox row. It inserts a new outbox row (`reason = 'sweep'`). The wait grows each time the same job is swept: 5, 10, 20, 40 minutes, capped at 1 hour, so a deep backlog is never flooded with duplicates. The history lives in two fields **on the job** (`sweep_count` and `last_enqueued_at`, updated in the same transaction as every outbox insert, and `sweep_count` reset when a worker claims the job), not in the outbox table, so deleting old outbox rows can never reset the wait (D38). The sweep cannot tell a lost message from a slow queue, which is why it waits longer each time. A duplicate message it sends is harmless: the claim refuses a job that is already running, finished, or not yet due. Each run handles a bounded number of jobs, one transaction per job, claimed with `SKIP LOCKED`. Every sweep re-queue logs a warning, increments a metric and can alert, because it should be rare and usually means a bug.
 - **Unprocessable message** (unknown job id, corrupt body): ack, log an error with the message size only, count a metric. The sweep covers the job if one exists.
 - **Unknown job type** (misconfiguration only, since workers consume only their own queues): do not claim, ack, log an error, count a metric. The sweep re-queues it.
 - **Retries** use exponential backoff with jitter, with the delay held as `run_at` (section 10). There are no RabbitMQ delay queues, so the broker stays swappable. Delay precision equals the relay's polling interval (about a second). Phase 2 delayed jobs reuse the same mechanism.
@@ -357,6 +361,10 @@ Contract tests are what make "replace RabbitMQ with something else" safe: the ne
 - The same idempotency key at the same moment returns one job.
 - Concurrent submits never exceed the active-jobs cap.
 - A file belonging to another organisation is rejected at submit; a missing file is rejected.
+- A slow storage service does not lengthen the time the organisation lock is held, and does not stall other submits.
+- Two tabs refreshing with the same token: the second gets the "already refreshed" answer and the login stays valid; reuse after the window revokes the whole family; refresh is refused after `family_expires_at`.
+- Cleaning up old outbox rows does not reset a job's sweep wait.
+- With Redis down, refresh still works (fails open) and login is rejected (fails closed).
 - **Isolation contract test:** one organisation can never read another's jobs or files through any repository method. This is the condition for relying on application-level isolation instead of row-level security.
 
 How integration tests start their services (throwaway containers from test code, or a shared Compose test profile) is still open and will be settled when versions are pinned.
@@ -368,13 +376,13 @@ How integration tests start their services (throwaway containers from test code,
 - The docs check (section 13) fails the build when an endpoint has no doc file.
 - FastAPI's generated OpenAPI is a secondary reference. The markdown files are the maintained documentation.
 
-**Phase 1 endpoints identified so far** (each needs its own file): signup, login, refresh, logout; create, list and revoke API keys; `POST /v1/files`; `POST /v1/jobs`; `GET /v1/jobs` (status filter, keyset pagination); `GET /v1/jobs/{id}`; `GET /v1/jobs/{id}/attempts`; `GET /v1/job-types`; health and metrics.
+**Phase 1 endpoints identified so far** (each needs its own file): signup, login, refresh, logout; create, list and revoke API keys; `POST /v1/files`; `GET /v1/files/{id}` (status and a short-lived download link, needs `files:read`); `POST /v1/jobs`; `GET /v1/jobs` (status filter, keyset pagination); `GET /v1/jobs/{id}`; `GET /v1/jobs/{id}/attempts`; `GET /v1/job-types`; health and metrics.
 
 ## 15. Configuration
 
 - Everything required to run (secrets, connection URLs, credentials) is **validated at startup**. A missing or invalid value stops the service immediately, with a clear message. There are no hidden defaults that boot with wrong config. Required values include the JWT signing secret, issuer and audience, and the **public storage URL** used in presigned links (a link signed for an internal Docker host name does not work for outside clients).
-- Pure tuning values with a safe default may have defaults in code. The ones identified so far, whose default values still have to be written down: lease length, heartbeat interval, worker concurrency, wait before a delivered message is handed back, sweep wait and cap, sweep batch size, retry delays and max attempts, active-jobs cap, request rate limits, presigned URL lifetime, file size cap, pending-file expiry, job and outbox retention, payload and result size caps, token lifetimes.
-- `WORKER_JOB_TYPES` is optional. If unset, the worker serves every type it knows and logs that choice.
+- Pure tuning values with a safe default may have defaults in code. The ones identified so far, whose default values still have to be written down: lease length, heartbeat interval, worker concurrency, wait before a delivered message is handed back, sweep wait and cap, sweep batch size, retry delays and max attempts, active-jobs cap, request rate limits, presigned URL lifetime, file size cap, pending-file expiry, job and outbox retention, payload and result size caps, token lifetimes, refresh reuse window, absolute login lifetime (family expiry).
+- `WORKER_JOB_TYPES` is **required** for workers. Missing means the worker does not start. `*` means all types it has code for (D39).
 - Any fallback must be visible: named, logged, and obvious in the code.
 
 ## 16. Security notes
@@ -394,7 +402,7 @@ How integration tests start their services (throwaway containers from test code,
 | **0, Foundation** | Repo layout, Compose stack, startup config validation, observability skeleton, CI, docs check, and the verification list in section 18 |
 | **1, Core** | Organisations, signup (creates the first organisation) and login with access and refresh tokens, API keys and their Next.js pages, file upload, submit job, job list, status, attempts, result, worker pools, retries, the safety-net sweep, rate limiting (all four limits), `echo` handler plus one real sample handler that uses files and progress, e2e flows, API docs, rate limit docs |
 | **2** | Priorities (RabbitMQ priority on each queue), delayed jobs, cancel, completion webhooks, manual retry of a failed job |
-| **Deferred (decided, not Phase 1)** | Email verification and the email sender, password reset, member invitations, account recovery, trusted-proxy setting and per-email login limit, idle and absolute session limits, password re-entry for key actions, access-token denylist, token-based CSRF, asymmetric JWT signing, failing a job after N failed publishes, maximum wait for a type with no workers, LISTEN/NOTIFY wake-up for the relay, handler version mismatch, multipart upload, virus scanning, organisation and user deletion flow, audit log, billing and usage metering, time partitioning of `jobs`, row-level security, tested down-migrations. The full list with consequences is in the notepad. |
+| **Deferred (decided, not Phase 1)** | Email verification and the email sender, password reset, member invitations, account recovery, trusted-proxy setting and per-email login limit, idle session limit (the absolute login lifetime is in Phase 1 through the family expiry), password re-entry for key actions, access-token denylist, token-based CSRF, asymmetric JWT signing, failing a job after N failed publishes, maximum wait for a type with no workers, LISTEN/NOTIFY wake-up for the relay, handler version mismatch, multipart upload, virus scanning, organisation and user deletion flow, audit log, billing and usage metering, time partitioning of `jobs`, row-level security, tested down-migrations. The full list with consequences is in the notepad. |
 | **Wishlist** | OAuth providers, other queue adapters, per-organisation limit overrides, external workers, SSE |
 
 ## 18. Open items

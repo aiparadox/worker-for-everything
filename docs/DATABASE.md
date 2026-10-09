@@ -1,8 +1,8 @@
 # Database plan
 
-Status: **Draft for review** · Last updated: 2026-10-09
+Status: **Draft for review** · Last updated: 2026-10-10
 
-This document lays out the PostgreSQL schema, the indexes, and the rules for changing and operating it. It follows [`ARCHITECTURE.md`](ARCHITECTURE.md) and the decisions in [`discussion/NOTEPAD.md`](discussion/NOTEPAD.md) (D3, D5, D7, D8, D10, D12, D13, D16 to D18, D22 to D35).
+This document lays out the PostgreSQL schema, the indexes, and the rules for changing and operating it. It follows [`ARCHITECTURE.md`](ARCHITECTURE.md) and the decisions in [`discussion/NOTEPAD.md`](discussion/NOTEPAD.md) (D3, D5, D7, D8, D10, D12, D13, D16 to D18, D22 to D40).
 
 ---
 
@@ -112,15 +112,17 @@ Server-side record of refresh tokens for the browser login (D32). Replaces the e
 | family_id | uuid NOT NULL | All tokens descended from one login share it |
 | user_id | uuid NOT NULL | FK to `users`, `ON DELETE CASCADE` |
 | created_at | timestamptz NOT NULL | |
-| expires_at | timestamptz NOT NULL | |
+| expires_at | timestamptz NOT NULL | This token's own lifetime |
+| family_expires_at | timestamptz NOT NULL | The **absolute** end of the login. Set at login, copied to every rotated token, never extended. After it, refresh is refused (D40) |
 | used_at | timestamptz | Set when this token is exchanged for a new one |
 | revoked_at | timestamptz | Set on logout or when reuse is detected |
 | replaced_by | uuid | The token issued in exchange |
 | ip, user_agent | text | For investigations |
 
 Rules:
-- Every refresh **rotates** the token: the old one gets `used_at` and `replaced_by`, and a new row is inserted, in one transaction.
-- If a token with `used_at` set is presented again, the **whole family is revoked** (set `revoked_at` on every row with that `family_id`).
+- Every refresh **rotates** the token: the old one gets `used_at` and `replaced_by`, and a new row is inserted, in one transaction. The new row's `expires_at` never goes past `family_expires_at`.
+- **Reuse window (D37).** If a token with `used_at` set is presented again **within the reuse window** (a tuning value, for example 10 to 30 seconds), the answer is a distinct "already refreshed" error and nothing is revoked. This covers two browser tabs, or a reload during a refresh.
+- If a used token is presented again **after the window**, the **whole family is revoked** (set `revoked_at` on every row with that `family_id`).
 - Logout revokes the family. The short-lived access token stays valid until it expires (accepted).
 
 Indexes: index on `family_id`; index on `user_id`; index on `expires_at` for cleanup.
@@ -185,17 +187,16 @@ Indexes: unique on `storage_key`; index on `organisation_id`; partial index on `
 
 ### 4.8 `job_files`
 
-Links a job to the files it uses, so cleanup never removes a file a job still needs.
+Links a job to its **input** files, so cleanup never removes a file a job still needs. A result file is linked by `jobs.result_file_id`, so every file has exactly one kind of link (D40). Both links are real foreign keys, so the database refuses to delete a file that is still used.
 
 | Column | Type | Notes |
 |---|---|---|
 | job_id | uuid NOT NULL | FK to `jobs`, `ON DELETE CASCADE` |
 | file_id | uuid NOT NULL | FK to `files`, `ON DELETE RESTRICT` |
-| role | text NOT NULL | `input` or `result` |
 
 Primary key: `(job_id, file_id)`. Index on `file_id`.
 
-Written in the submit transaction for input files, and when a job stores a result file.
+Written in the submit transaction. The input files' rows are locked (`FOR SHARE`) in that same transaction, so cleanup cannot delete them between the check and the insert.
 
 ### 4.9 `jobs`
 
@@ -225,6 +226,8 @@ The central table. Read and written constantly.
 | lease_owner | text | Worker id holding the lease |
 | lease_token | uuid | New random value on every claim. Every heartbeat and final write must match it, so a worker that lost its lease cannot overwrite a newer attempt |
 | lease_expires_at | timestamptz | When the lease runs out unless extended |
+| sweep_count | smallint NOT NULL | How many times the safety-net sweep has re-queued this job since its last claim. Default 0. Reset to 0 at claim (D38) |
+| last_enqueued_at | timestamptz NOT NULL | When a message was last put on the queue for this job. Set in the same transaction as every outbox insert. Default `now()` (D38) |
 | created_at | timestamptz NOT NULL | |
 | started_at | timestamptz | First time it began running |
 | finished_at | timestamptz | When it reached a final state |
@@ -285,7 +288,7 @@ Messages waiting to be published to RabbitMQ (D12). A job gets a **new row for i
 | publish_attempts | integer NOT NULL | Default 0. For monitoring a stuck message |
 | last_error | text | |
 
-Indexes: **partial** `(run_at, id) WHERE published_at IS NULL`; `(job_id, created_at DESC)` (used by the sweep and by purging). The relay's query is:
+Indexes: **partial** `(run_at, id) WHERE published_at IS NULL`; `(job_id)` (finds a job's unpublished rows, and is used when jobs are purged). The relay's query is:
 
 ```sql
 SELECT ... FROM outbox
@@ -311,18 +314,18 @@ Published rows are deleted by a cleanup job after a short time (section 10).
 
 | Operation | What happens | Transaction |
 |---|---|---|
-| Submit job | In this order: take the organisation's advisory lock; check the idempotency key (return the existing job if it matches); check each file in the payload (belongs to the organisation, exists in storage, mark `available`); count active jobs up to the cap; insert `jobs`, `job_files` and an `outbox` row (`reason = submit`) | One transaction. The lock is released at commit |
+| Submit job | **Before the transaction:** check each file in the payload against storage (HEAD) and mark found files `available`. **Then, in one transaction, in this order:** take the organisation's advisory lock; check the idempotency key (return the existing job if it matches); re-read the file rows (still `available`, same organisation, not expired) and lock them (`FOR SHARE`); capped count of active jobs; insert `jobs`, `job_files` and an `outbox` row (`reason = submit`) | One transaction. **No network call while the lock is held** (D36), so the lock lasts a few milliseconds. Released at commit |
 | Relay publish | Select due, unpublished outbox rows with `SKIP LOCKED`, publish with confirms, set `published_at` only on a clean confirm | One transaction per batch |
-| Worker claim | `UPDATE jobs SET status='running', lease_owner=:w, lease_token=:new_random, lease_expires_at=now()+:lease, attempts=attempts+1, started_at=COALESCE(started_at, now()) WHERE id=:id AND status IN ('queued','retrying') AND run_at <= now()`, then insert `job_attempts` | One transaction. Zero rows updated means refused: ack and log, nothing else. **Ack after the commit** |
+| Worker claim | `UPDATE jobs SET status='running', lease_owner=:w, lease_token=:new_random, lease_expires_at=now()+:lease, attempts=attempts+1, sweep_count=0, started_at=COALESCE(started_at, now()) WHERE id=:id AND status IN ('queued','retrying') AND run_at <= now()`, then insert `job_attempts` | One transaction. Zero rows updated means refused: ack and log, nothing else. **Ack after the commit** |
 | Heartbeat | Update `lease_expires_at` (and `progress` if reported), guarded by `WHERE id=... AND status='running' AND lease_token=...`. Zero rows updated means the lease was lost, so the worker stops and the attempt is recorded as `lease_lost` | Single statement. Progress updates are throttled |
 | Finish (success) | Same guard on the lease token. Set `succeeded`, result, `finished_at`, close the `job_attempts` row | One transaction |
-| Retry (failure, attempts left) | Same guard on the lease token. Set `retrying`, set `jobs.run_at = now() + :delay`, close the `job_attempts` row, insert a **new `outbox` row** (`reason = retry`) with the same `run_at` | One transaction. The worker never talks to RabbitMQ to requeue |
+| Retry (failure, attempts left) | Same guard on the lease token. Set `retrying`, set `jobs.run_at = now() + :delay`, close the `job_attempts` row, insert a **new `outbox` row** (`reason = retry`) with the same `run_at`, and set `last_enqueued_at = now()` | One transaction. The worker never talks to RabbitMQ to requeue |
 | Fail (permanent error, or attempts used up) | Same guard. Set `failed`, store the error, `finished_at`, close the `job_attempts` row | One transaction. Nothing else: there is no dead-letter queue |
-| Recover (lease expired) | Find `running` jobs whose lease has expired. If `attempts >= max_attempts`: set `failed` and close the open attempt as `lease_lost`. Otherwise: set `retrying`, close the attempt as `lease_lost`, insert a new `outbox` row (`reason = recovery`) | Runs in the `maintenance` container. One transaction per job, claimed with `SKIP LOCKED`. Prevents a job that crashes every worker from looping forever |
-| Sweep | Find jobs with `status IN ('queued','retrying')`, `run_at < now() - wait`, no unpublished outbox row, and a newest outbox row older than `wait`. Insert a new `outbox` row (`reason = sweep`, `run_at = now()`) | Runs in `maintenance`. One transaction per job, `SKIP LOCKED`, bounded batch. `wait` grows with the number of `sweep` rows for the job since its last claim: 5, 10, 20, 40 minutes, capped at 1 hour. Each re-queue is logged as a warning and counted |
+| Recover (lease expired) | Find `running` jobs whose lease has expired. If `attempts >= max_attempts`: set `failed` and close the open attempt as `lease_lost`. Otherwise: set `retrying`, set `run_at = now() + :delay` (the same backoff function as retries, so a job that crashes its worker is not retried at once), close the attempt as `lease_lost`, insert a new `outbox` row (`reason = recovery`) with the same `run_at`, and set `last_enqueued_at = now()` | Runs in the `maintenance` container. One transaction per job, claimed with `SKIP LOCKED`. Prevents a job that crashes every worker from looping forever |
+| Sweep | Find jobs with `status IN ('queued','retrying')`, `run_at < now() - wait`, `last_enqueued_at < now() - wait`, and no unpublished outbox row. For each: insert a new `outbox` row (`reason = sweep`, `run_at = now()`), set `sweep_count = sweep_count + 1` and `last_enqueued_at = now()`. `wait` is 5 minutes doubled for each earlier sweep: `5 min * 2^sweep_count`, capped at 1 hour (D38) | Runs in `maintenance`. One transaction per job, `SKIP LOCKED`, bounded batch. The history is on the `jobs` row, so deleting old outbox rows never resets it. Each re-queue is logged as a warning and counted |
 | Unprocessable message, unknown job type | No database change. Ack, log an error (size only, no content), count a metric | None |
 | List and poll | `SELECT` by `id` and `organisation_id`, or a keyset-paginated list filtered by status | Read only |
-| Refresh token | Mark the old token used, insert the new one; if a used token is presented, revoke the family | One transaction |
+| Refresh token | Refuse if `family_expires_at` has passed. Mark the old token used, insert the new one (never past `family_expires_at`). If a used token is presented again: inside the reuse window return "already refreshed" and change nothing; after the window revoke the family | One transaction |
 
 The conditional `WHERE status IN (...) AND run_at <= now()` on the claim is what stops two workers running one job, and what makes a duplicate or early message harmless, even if the broker delivers twice.
 
@@ -344,13 +347,14 @@ SELECT count(*) FROM (
 
 The cost never grows past the cap. The cap value is therefore a performance setting as well as a fairness one, and should stay in the low thousands.
 
-**Keep the cap exact.** Submit takes a per-organisation, transaction-level advisory lock (`pg_advisory_xact_lock`, keyed on the organisation id), then does the idempotency check, the capped count, and the inserts. Concurrent submits for the **same** organisation run one at a time. Submits for different organisations do not block each other. The order matters:
+**Keep the cap exact.** Submit takes a per-organisation, transaction-level advisory lock (`pg_advisory_xact_lock`, keyed on the organisation id), then does the idempotency check, the capped count, and the inserts. Concurrent submits for the **same** organisation run one at a time. Submits for different organisations do not block each other. The slow storage checks for the payload's files happen **before** the transaction, so no network call is made while the lock is held (D36). Inside the transaction, the order matters:
 
 1. Take the lock.
 2. Check the idempotency key. If a job already exists for it, return it. Checking before the lock would let two identical requests both pass; counting before the idempotency check could refuse a harmless repeat at the cap.
-3. Count up to the cap.
-4. Insert.
-5. Commit, which releases the lock.
+3. Re-read the file rows from the database and lock them (`FOR SHARE`).
+4. Count up to the cap.
+5. Insert.
+6. Commit, which releases the lock.
 
 A transaction-level lock is released at commit, which should make it safe with PgBouncer transaction pooling (a session-level lock would not be). This is on the Phase 0 verify list. If lock contention for a very busy organisation ever becomes a problem, a lock-free version that tolerates a small overshoot is deferred.
 
@@ -393,7 +397,7 @@ All values are tuning settings with documented defaults. Exact defaults are not 
 
 | Data | Rule |
 |---|---|
-| `outbox` published rows | Delete in small batches after a short delay (hours to a day) |
+| `outbox` published rows | Delete in small batches after a short delay (hours to a day), whatever state the job is in. Nothing depends on them: the sweep keeps its history on the `jobs` row (D38) |
 | `refresh_tokens` expired or revoked | Delete after a grace period |
 | `files` with `status = 'pending'` past `expires_at` | Delete the row and the object (unused uploads) |
 | `files` that jobs use | Follow job retention: removed with the last job that uses them, via `job_files` |
@@ -450,7 +454,7 @@ The full list, with the consequence of each, is in the "Deferred / later" sectio
 - Billing and usage metering.
 - Per-organisation limit overrides: wishlist.
 - Deleting an organisation or a user: `jobs.organisation_id` is `ON DELETE RESTRICT`, so an organisation with jobs cannot be deleted directly. The intended flow (disable, purge jobs after retention, then delete) is not designed, and neither is erasing a user's personal data.
-- Idle and absolute session limits, "active sessions" view, access-token denylist: deferred.
+- Idle session limit, "active sessions" view, access-token denylist: deferred. (The absolute login lifetime is built, through `refresh_tokens.family_expires_at`.)
 - Handler version versus `jobs.type_version` mismatch: deferred.
 - Row-level security as a second isolation layer: deferred.
 
