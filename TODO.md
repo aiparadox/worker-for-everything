@@ -13,7 +13,7 @@ Approved by the user on 2026-10-10. **Nothing is implemented yet.** Before any i
 - [x] ISS-20261010-1156 — Choose SQLAlchemy 2.1 or 2.0 after a trial run, the S3 client path (aiobotocore or boto3 in a thread pool), and how integration tests start services (testcontainers or a Compose test profile). Decided as D46 to D48: SQLAlchemy 2.1 (2.0.54 as fallback, trial in FEAT-20261010-1208), boto3 in a thread pool, Compose test profile. [2026-10-10 12:25]
 - [x] ISS-20261010-1157 — Update ARCHITECTURE.md, DATABASE.md and the docs/virtual-implementation files for D41 to D43 (Python 3.12, Valkey instead of Redis, development stage) and for the answers to ISS-20261010-1155. Done for D41 to D48 (Redis replaced by Valkey in 64 lines, Python 3.12, SQLAlchemy 2.1, boto3, Compose test profile); findings.md carries a note instead of edits because it records the review as written. The part for the answers to ISS-20261010-1155 moved into that item. [2026-10-10 12:41]
 - [x] ISS-20261010-1158 — Add the missing supersession notes in NOTEPAD.md for D3, D7, D9, D10, D16 and D17, and correct the note on D15 (finding F-30). [2026-10-10 12:41]
-- [ ] ISS-20261010-1159 — Write default values for all tuning settings (lease length, heartbeat interval, concurrency per pool, retry delays, caps, rate limits, retention, token lifetimes, refresh reuse window) once the load numbers or a development profile are agreed.
+- [x] ISS-20261010-1159 — Write default values for all tuning settings (lease length, heartbeat interval, concurrency per pool, retry delays, caps, rate limits, retention, token lifetimes, refresh reuse window) once the load numbers or a development profile are agreed. Done as the development starting values in section 3.5 of docs/specs/FEAT-20261010-1203-config.md, approved 2026-10-10; to be tuned with real numbers later. [2026-10-10 13:14]
 - [x] ISS-20261010-1200 — Decide which decisions need an ADR in docs/adr/ (CLAUDE.md Module 7), for example the transactional outbox, RabbitMQ per-type queues, UUIDv7 keys and Valkey. Decided as D49: six ADRs (outbox and delivery, RabbitMQ per-type queues, ports and adapters, auth model, Postgres conventions, external services). [2026-10-10 12:30]
 - [ ] FEAT-20261010-1311 — Write the six ADRs decided in D49 in docs/adr/ (0001 to 0006), each just before the first spec it affects. The content already exists in NOTEPAD.md; check the decision numbers cited in D49 as each is written.
 
@@ -24,22 +24,23 @@ Approved by the user on 2026-10-10. **Nothing is implemented yet.** Before any i
 - [ ] FEAT-20261010-1203 — Phase 0: write the configuration module that stops at startup when a required setting is missing, plus a development .env.example with obviously fake values.
 - [ ] FEAT-20261010-1204 — Phase 0: set up Alembic with its generator and write the first migration for all 11 tables in DATABASE.md, with the roles qfe_migrator and qfe_app.
 - [ ] FEAT-20261010-1205 — Phase 0: observability skeleton: JSON logs with trace id, /metrics, /healthz and /readyz, and the collector configuration.
-- [ ] FEAT-20261010-1206 — Phase 0: define the port interfaces (QueueAdapter, StorageAdapter, RateLimiter, AuthProvider, repositories, Clock, IdGenerator) and a shared contract test suite for each.
+- [ ] FEAT-20261010-1206 — Phase 0: define the port interfaces (QueueAdapter, StorageAdapter, RateLimiter, Clock, IdGenerator), in-memory fakes and a shared contract test suite for each (spec: docs/specs/FEAT-20261010-1206-ports-and-contract-tests.md). AuthProvider moved to FEAT-20261010-1218 and the repository interfaces to FEAT-20261010-1211, approved 2026-10-10.
 - [ ] FEAT-20261010-1207 — Phase 0: set up test scaffolding for unit, integration, contract and end-to-end levels, and the docs check that fails when a route has no file in docs/apis/.
 - [ ] FEAT-20261010-1208 — Phase 0: install the chosen dependency versions together in the project environment and run them, including httpx on Python 3.12 and Next.js with the TypeScript version its generator picks. Each dependency needs approval first (CLAUDE.md Module 5). Depends on ISS-20261010-1154 and ISS-20261010-1156.
 - [ ] FEAT-20261010-1209 — Phase 0: SeaweedFS end-to-end checks from outside Docker: presigned POST with a size limit, the public URL setting, HEAD, and lifecycle expiry.
+- [ ] FEAT-20261010-1319 — Phase 0: GitHub Actions workflow (D45) running ruff, mypy, the unit and contract tests, the docs check, the Compose-based integration tests and the frontend build. Side finding while writing the spec for FEAT-20261010-1207: ARCHITECTURE.md puts CI in Phase 0 but no item built it. Depends on FEAT-20261010-1207.
 
 ## Phase 1: core
 
 - [ ] FEAT-20261010-1210 — Phase 1: domain layer: the job state machine as one transition table, and the retry delay function, with unit tests for every transition.
-- [ ] FEAT-20261010-1211 — Phase 1: data-access: all repositories and transactional operations (accounts, files, jobs, outbox, maintenance) as described in docs/virtual-implementation/data-access.md, with integration tests. Uses FEAT-20261010-1210.
+- [ ] FEAT-20261010-1211 — Phase 1: data-access: all repositories and transactional operations (accounts, files, jobs, outbox, maintenance) as described in docs/virtual-implementation/data-access.md, with integration tests. Uses FEAT-20261010-1210. Also defines the repository interfaces (moved here from FEAT-20261010-1206).
 - [ ] FEAT-20261010-1212 — Phase 1: job type registry with the echo job type, the FileRef type, PermanentError and the handler contract.
 - [ ] FEAT-20261010-1213 — Phase 1: queue adapter on RabbitMQ (one queue per job type, publish with confirms and returns, consume, ack, nack), with contract tests.
 - [ ] FEAT-20261010-1214 — Phase 1: storage adapter on SeaweedFS (presigned upload, HEAD, download link, delete, read, write, ensure bucket), with contract tests.
 - [ ] FEAT-20261010-1215 — Phase 1: outbox relay.
 - [ ] FEAT-20261010-1216 — Phase 1: worker with pools through WORKER_JOB_TYPES, concurrency, heartbeat, graceful stop and the hard time cap. Depends on ISS-20261010-1155.
 - [ ] FEAT-20261010-1217 — Phase 1: maintenance container: lease recovery, safety-net sweep, cleanups and job purge.
-- [ ] FEAT-20261010-1218 — Phase 1: accounts and auth: signup (creates the first organisation), login, refresh with the reuse window, logout, API key create, list and revoke, and the credential checks.
+- [ ] FEAT-20261010-1218 — Phase 1: accounts and auth: signup (creates the first organisation), login, refresh with the reuse window, logout, API key create, list and revoke, and the credential checks. Also defines the AuthProvider interface (moved here from FEAT-20261010-1206).
 - [ ] FEAT-20261010-1219 — Phase 1: rate limiter on Valkey with the four request classes and the fail-open and fail-closed rules, plus docs/rate-limits.md.
 - [ ] FEAT-20261010-1220 — Phase 1: job API: submit, list, get, attempts and job types, each with its file in docs/apis/.
 - [ ] FEAT-20261010-1221 — Phase 1: file API: upload link, get file, input file checks and the result file flow, each with its file in docs/apis/.
