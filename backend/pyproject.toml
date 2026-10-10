@@ -54,7 +54,8 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["qfe"]
+# The tests are type-checked too, which also proves that the fakes fit the port interfaces.
+files = ["src/qfe", "tests"]
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
