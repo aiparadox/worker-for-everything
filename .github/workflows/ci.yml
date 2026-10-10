@@ -21,7 +21,7 @@ concurrency:
 jobs:
   backend-checks:
     name: Backend checks (lint, types, fast tests, API docs check)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -40,7 +40,7 @@ jobs:
 
   backend-stack-tests:
     name: Backend tests against the Docker services
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
@@ -70,7 +70,7 @@ jobs:
 
   frontend:
     name: Frontend (lint, build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

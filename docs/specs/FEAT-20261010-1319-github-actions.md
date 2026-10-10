@@ -17,7 +17,7 @@ One workflow file that runs, on every push to `master` and on every pull request
 
 ## 3. Proposal
 
-File: `.github/workflows/ci.yml`. Triggers: `push` to `master`, `pull_request`, and `workflow_dispatch` (a manual "Run workflow" button, added after the first push produced no run). Permissions: `contents: read` only. A `concurrency` group cancels an older run of the same branch when a newer push arrives.
+File: `.github/workflows/ci.yml`. Triggers: `push` to `master`, `pull_request`, and `workflow_dispatch` (a manual "Run workflow" button, added after the first push produced no run). Permissions: `contents: read` only. Jobs run on `ubuntu-24.04`, not `ubuntu-latest`, because GitHub moves `ubuntu-latest` to Ubuntu 26 on 2026-10-19 (approved by the user); the version is raised deliberately. A `concurrency` group cancels an older run of the same branch when a newer push arrives.
 
 Three jobs run in parallel:
 
