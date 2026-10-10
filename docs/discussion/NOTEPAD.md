@@ -2,7 +2,7 @@
 
 This file is the full memory of the design discussion. A new session should be able to read only this file (plus `CLAUDE.md`, `docs/ARCHITECTURE.md` and `docs/DATABASE.md`) and continue without guessing what was decided, why, what else was considered, or how the parts connect.
 
-Last updated: 2026-10-10 · Session: `qfe-8-10-2026`
+Last updated: 2026-10-10 (evening) · Session: `qfe-8-10-2026`
 
 How to read it:
 
@@ -19,14 +19,15 @@ Plain English is required for explanations to the user (`CLAUDE.md`, Module 10).
 
 | Item | State |
 |---|---|
-| Phase of work | Design. No product code, no scaffolding, no dependencies installed. |
-| Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D40 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 and corrected on 2026-10-10 to match all of them. |
-| Waiting on | The user's review and approval of `ARCHITECTURE.md` and `DATABASE.md`, and the user's next ("big") task. The user has said **write no code yet**. Metadata and documentation checks are done (section "Phase 0 verification results"); five choices are waiting for the user: Python 3.14 or 3.12, SQLAlchemy 2.1 or 2.0, Redis or Valkey, the S3 client path, and the integration test setup. |
+| **Resume here** | After a compaction or in a new session: read this table, then `TODO.md`, then the section "Decisions after the virtual implementation" (D41 to D44) further down. **Do not start implementing anything until the user says so.** The first work is the "Decide first" group in `TODO.md` (tooling choices, the 10 open questions, SQLAlchemy and S3 client choices). Scratch tools used for the virtual implementation (verify scripts, working ledger) are in the session scratchpad, not in the repo, and are not needed to continue. |
+| Phase of work | Design finished. The task list is approved and written to `TODO.md` (77 items). No product code, no scaffolding, no dependencies installed. |
+| Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D44 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 and corrected on 2026-10-10. The virtual implementation (`docs/virtual-implementation/`, 16 files, 40 findings, 172 assumptions) was written and reviewed. |
+| Waiting on | The user's go-ahead to start. Open decisions, all listed in `TODO.md` under "Decide first": Python tooling (dependency manager, linter, formatter, type checker, CI tool), the 10 questions in `docs/virtual-implementation/findings.md` section 6 (the user has no load numbers yet and does not want to fixate on production), SQLAlchemy 2.1 or 2.0, the S3 client path, and the integration test setup. The user said no code yet. |
 | Docs state | Both design docs match D19 to D40 as of 2026-10-10. They are drafts until the user approves them. Not pushed to GitHub from this session (no SSH access); the user pushes. |
-| Next step | After the user approves both docs: present the **task inventory** (Phase 0, Phase 1, Phase 2, deferred list, verification tasks) in plain English. Only after approval, write items to `TODO.md` as `[ ]`. |
+| Next step | Work the "Decide first" items in `TODO.md` with the user, one decision at a time, and record each answer as a numbered decision (D45 and on). Then, per item: verify the code or setup, write a short spec in `docs/specs/`, get it approved, and only then implement. |
 | After that | Per item: verify the code or setup, write a short spec in `docs/specs/`, get approval, then implement on the checked-out branch. |
-| Commits | History was rewritten on 2026-10-08 to remove `CLAUDE.md` (user chose option C1). Local commits: `0544977` initial commit (notepad), `db790a4` architecture doc, `bcc58ce` database plan and updates, `536136f` rewrite for D23 to D35, then the D36 to D40 commit (see `git log`). Branch: `master`. The old hashes `d6c8a98` and `80f32a0` no longer exist locally. **The user says they ran the force-push themselves** (the Claude session cannot authenticate to GitHub: `Permission denied (publickey)`), so GitHub should now match; not verified from this session. `CLAUDE.md` stays on disk and is ignored through `.git/info/exclude` (local only). |
-| Not created yet | `TODO.md`, `docs/specs/`, `docs/adr/`, `docs/apis/`, any code. |
+| Commits | History was rewritten on 2026-10-08 to remove `CLAUDE.md` (user chose option C1). Local commits (newest first): `923a2e7` virtual implementation corrections, `82672ad` virtual implementation, `13a5a2e` verification results, then `53deb26`, `536136f`, `bcc58ce`, `db790a4`, `0544977` (see `git log`). Branch: `master`. **Uncommitted when this note was written:** the D41 to D44 edits to this file and `ARCHITECTURE.md`, and the new `TODO.md`. Check `git status`. The old hashes `d6c8a98` and `80f32a0` no longer exist locally. **The user says they ran the force-push themselves** (the Claude session cannot authenticate to GitHub: `Permission denied (publickey)`), so GitHub should now match; not verified from this session. `CLAUDE.md` stays on disk and is ignored through `.git/info/exclude` (local only). |
+| Not created yet | `docs/specs/`, `docs/adr/`, `docs/apis/`, `docs/rate-limits.md`, any code. (`TODO.md` exists since 2026-10-10.) |
 
 ### Working rules that shaped this session (from `CLAUDE.md`)
 
@@ -94,6 +95,9 @@ Everything happened on 2026-10-08. Each row is one exchange.
 | 18 | User pasted a second analysis of the committed docs (four problems and several smaller points). I checked each against the files, confirmed all four, and explained three of them on request: the lock held during storage calls, a used refresh token shown again from a second tab, and what the sweep is. The user also asked whether duplicate sweep messages could run a job twice, and whether the outbox keeps finished jobs. | **Apply all recommendations** (D36 to D40), including `family_expires_at` and `GET /v1/files/{id}`. `WORKER_JOB_TYPES` required with `*` ("ok"). | Four real flaws fixed in my own docs. |
 | 19 | Docs updated for D36 to D40 and committed. | See the Commits row in section 1. | The notepad's state rows are current again. |
 | 20 | User said the design for Phase 1 is done, forbade writing any code, and asked me to verify the remaining items and log requirements before giving me a big task. They confirmed the Claude session cannot reach GitHub because the SSH key has a passphrase. | I verified packages, image tags, npm and upstream documentation (nothing installed or run) and recorded the results in "Phase 0 verification results". Findings that change the design: relay needs `on_return_raises=True`; do not use `aioboto3`; use a presigned POST policy for upload size limits; Redis 8 is AGPLv3 (Valkey is BSD). | The user can now make the five pending choices (Python version, SQLAlchemy version, Redis or Valkey, S3 client, integration test setup). **Not committed yet.** |
+| 21 | User gave a large task: build a "virtual implementation" as documentation (overview, one file per part, findings) with strict citation tags, in five phases with gates after phases 1 and 2. | I proposed 14 parts and 8 flows (approved), wrote `overview.md`, 14 part files and `findings.md`, and ran script checks (all tags and cross-references resolve; 172 assumptions registered). Committed as `82672ad`. | The design could now be examined as if it were built. |
+| 22 | User pasted a review of that work from another session. | I checked each claim, confirmed the real defects, corrected my own wrong fixes (two), added three missed findings, re-rated four, and committed as `923a2e7`. Result: 40 findings (8 High). I disagreed with one suggestion (a pull loop for consuming; RabbitMQ discourages polling). | Findings are in `docs/virtual-implementation/findings.md`. |
+| 23 | User answered the blocking items: Python 3.12, Valkey, development mode, and approved the task list. They asked how the heartbeat works; I explained and proposed a heartbeat thread plus a watchdog that ends the process on timeout (no child process at concurrency 1; not yet a decision). They then said not to start implementing, to update all files and memory, and that they would compact the session. | D41 to D44 recorded; `TODO.md` written (77 items). | Work resumes with the "Decide first" items. |
 
 ## 5. Decisions in detail
 
@@ -497,6 +501,41 @@ The user ran another analysis session over the committed docs and pasted its fin
 - **`GET /v1/files/{id}` added** (status and a short-lived download link, needs `files:read`), so the `files:read` scope has an endpoint. This was the other open call; same outcome.
 - **Wording:** "four levels of tests plus a docs check"; `last_updated` dates; this notepad's stale state rows.
 
+## Decisions after the virtual implementation (2026-10-10)
+
+The virtual implementation (`docs/virtual-implementation/`) ended with 10 open questions and a list of what blocks starting. The user answered four of the blocking items. The other open questions are still open and are tracked in `docs/virtual-implementation/findings.md` sections 6 and 7.
+
+### D41. Python 3.12
+
+- **Decided by:** the user ("let go with stable 3.12").
+- **Why:** stable, and every package checked declares support for 3.12 (section "Phase 0 verification results").
+- **Consequences:** `uuid.uuid7()` is not in the 3.12 standard library, so primary keys are generated by Postgres `uuidv7()` (`DEFAULT uuidv7()`), and the application reads the id back with `RETURNING` when it needs it inside a transaction. A small library such as `uuid-utils` is only needed if the application must know an id before the insert. SQLAlchemy 2.1 needs Python 3.11 or newer, so it still fits. The Docker base image is `python:3.12-slim`. This settles D13's open question and V3.
+
+### D42. Valkey instead of Redis; handlers may bring their own store
+
+- **Decided by:** the user ("we are not going for any AI based solution... valkey is fine and handler can have their own redis/valkey depending on its need").
+- **What:** the rate limiter store is Valkey (`valkey/valkey:8`), BSD licensed and Redis-compatible, behind the same `RateLimiter` port. The `redis` Python client is expected to work with it (a search said so; not tested). Wherever the design documents say "Redis", read "Valkey".
+- **Handlers:** a job handler that needs its own Redis-compatible store may use one. That store belongs to that handler and is not part of the platform. Each such store is a new service and needs approval when a handler needs it (CLAUDE.md Module 5).
+- **Open edit:** the word "Redis" is still in many places in `ARCHITECTURE.md`, `DATABASE.md` and the virtual implementation. Replacing it is a task in the task list.
+
+### D43. Development mode: production deployment is not the focus now
+
+- **Decided by:** the user ("we are in development mode right now, don't fixate on production deployment for now").
+- **What:** Phase 0 and Phase 1 target a development stack run with Docker Compose. Ingress, TLS, a trusted-proxy setting, backups, secret management and published ports are **not** blocking. They stay on the list as deferred items and become blocking before any real deployment.
+- **Still applies:** required configuration still fails at startup, and no secret is hidden as a default (CLAUDE.md Module 4). A development `.env.example` with obviously fake values is fine; real secrets are never committed.
+- **Effect on the findings:** F-07 (no ingress or TLS) and the proxy-related parts of F-06 and F-31 are deferred, not dropped.
+
+### D44. Task list approved; implementation not started
+
+- **Decided by:** the user ("approved. Don't start on the implementation yet, just update all your files and memory, and then I will compact the session first. after that we will start.").
+- **What:** the task list was approved as presented and written to `TODO.md`: 77 items, in six groups: Decide first (7), Phase 0 foundation (9), Phase 1 core (18), High findings to resolve (7), Phase 2 (5), Deferred (31). All are `[ ]`. The first batch has consecutive-minute IDs (`ISS-20261010-1154` to `WISH-20261010-1310`).
+- **Process rule that follows (CLAUDE.md Module 7):** no item starts until its code or setup has been checked, a short spec exists in `docs/specs/`, and the user has approved the spec. Branch and merge actions happen only when the user asks.
+- **Findings handling:** the 8 High findings are tracked as their own items (F-07, ingress and TLS, sits inside the deferred production item by D43). The other findings are resolved inside the spec of the part they belong to.
+
+### Open: tooling choices not yet discussed
+
+The dependency manager (for example `uv`, `pip-tools` or `poetry`), the linter and formatter, the type checker, and the CI tool have not been discussed anywhere. They block Phase 0 scaffolding and must be decided with the user.
+
 ### Deferred / later (decided to postpone, not Phase 1)
 
 These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.
@@ -613,6 +652,8 @@ Every package below declares support for Python 3.12, 3.13 and 3.14 (classifiers
 
 ### Choices this check puts in front of the user (nothing decided)
 
+> **Update 2026-10-10:** Python 3.12 (D41) and Valkey (D42) are now decided. The SQLAlchemy version, the S3 client and the integration test setup are still open.
+
 - **Python 3.14 or 3.12.** Every package supports 3.14, the `python:3.14-slim` image exists, and 3.14 has `uuid.uuid7()` in the standard library. Recommendation: 3.14. Python 3.12 would work too, with Postgres generating ids (or a small library for app-side ids).
 - **SQLAlchemy 2.1 or 2.0.** 2.1 is a new minor line (Python 3.11 minimum, behaviour changes above); Alembic 1.19.2 and later cover it. Staying on 2.0 is the cautious option. Recommendation: decide in the Phase 0 spec after a trial run.
 - **Redis or Valkey** for the rate limiter. Both images exist; `redis:8` is AGPLv3, `valkey/valkey:8` is BSD. We use it only as an internal service, so either is workable. Pick by the user's licence policy. The `RateLimiter` adapter is unaffected.
@@ -720,7 +761,7 @@ Each has context so it can be settled without re-discovery.
 | Q10 | Integration tests: throwaway containers started from test code, or a shared Compose test profile | Depends on which library fits the pinned versions. Not checked yet. | Decide when versions are pinned. |
 | V1 | Do FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js support the chosen Python and Node versions? | **VERIFIED 2026-10-10 (metadata only).** Every listed package declares support for Python 3.12 to 3.14; Next.js 16.4 needs Node >=20.9. Details in "Phase 0 verification results". | Real installs and test runs still happen in Phase 0, each dependency approved first (Module 5). |
 | V2 | Does the `postgres:18` Docker image tag exist and work for our needs? | **VERIFIED:** `postgres:18` and `postgres:18-alpine` exist on Docker Hub; `uuidv7()` is in the Postgres 18 docs. | Pin an exact tag in Phase 0. |
-| V3 | Python 3.14 or let Postgres generate every id | **Answerable now:** the whole stack declares 3.14 support, `python:3.14-slim` exists, and 3.14 has `uuid.uuid7()`. | Recommend Python 3.14. The user decides. |
+| V3 | Python 3.14 or let Postgres generate every id | **Answerable now:** the whole stack declares 3.14 support, `python:3.14-slim` exists, and 3.14 has `uuid.uuid7()`. | **DECIDED (D41): Python 3.12, ids generated by Postgres.** |
 | R1 | Default values for the rate limits and every other tuning setting (lease length, heartbeat interval, worker concurrency, wait before handing back an unstarted message, sweep wait and cap, sweep batch size, retry delays, active-jobs cap, presigned URL lifetime, file size cap, pending-file expiry, retention, payload and result caps, token lifetimes, refresh reuse window, absolute login lifetime) | User has not given numbers. Needs expected traffic. Tuning values may have code defaults (Module 4). | Settle in Phase 0 or the first spec. Pick conservative defaults, configurable by env, and document them. |
 | H1 | Which real sample handler ships in Phase 1 (besides `echo`) | Not discussed. | Something small and dependency-light that exercises files and progress, to prove the contract. Ask the user. |
 | ~~DB1~~ | **CLOSED.** Assumptions A1 to A9 settled in D29 and D34. | | |
