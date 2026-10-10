@@ -7,6 +7,8 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Adds a "Run workflow" button on the Actions tab, to start a run by hand.
+  workflow_dispatch:
 
 permissions:
   contents: read
