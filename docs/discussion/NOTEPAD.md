@@ -631,6 +631,15 @@ The virtual implementation (`docs/virtual-implementation/`) ended with 10 open q
 - **Checks run:** uv resolved Python 3.12.2 and `uv lock` produced `backend/uv.lock` (no packages); all 17 subpackages import under Python 3.12.2 in `backend/.venv`; frontend lint and build pass; `git status` clean, with `.venv`, `node_modules` and `.next` ignored. The pytest, ruff and mypy runs wait for `FEAT-1208`, as the spec says.
 - **Note:** git warns that `frontend/package.json` will have CRLF changed to LF (the generator wrote CRLF on Windows); `.gitattributes` handles it.
 
+### Result of FEAT-20261010-1208: dependencies installed and checked (2026-10-10)
+
+- **Built (branch `feat-20261010-1208-dependencies`):** the approved list was added with `uv add` and `uv add --dev`; `backend/uv.lock` pins the result. Everything resolved together on Python 3.12.2 in one go, including the beta OpenTelemetry instrumentation packages (`0.66b1`, pinned exactly with the 1.45.1 SDK line) and SQLAlchemy 2.1.4 with the `asyncio` extra (greenlet 3.5.6).
+- **Resolved versions (main ones):** fastapi 0.143.0, starlette 1.7.0, uvicorn 0.54.0, pydantic 2.14.0, pydantic-settings 2.15.0, sqlalchemy 2.1.4, asyncpg 0.32.0, alembic 1.20.0, aio-pika 10.1.0 (aiormq 7.2.1), redis 8.1.0, pyjwt 2.15.1, pwdlib 0.3.1 (argon2-cffi 25.1.0), boto3 1.43.111 (botocore 1.43.111), httpx 0.28.1, structlog 26.1.0, prometheus-client 0.26.0; dev: ruff 0.17.0, mypy 2.4.0, pytest 9.1.1, pytest-asyncio 1.4.0, pytest-cov 7.1.0.
+- **Version ranges:** uv wrote lower bounds (`>=`) for most packages, not the "compatible release" ranges the spec described. The lock file is what pins the exact versions; upgrades are deliberate (`uv lock --upgrade-package`). Tightening the ranges is possible later and is not needed now.
+- **Checks passed:** `ruff check`, `ruff format --check`, `mypy` (strict, 18 files), `pytest` (20 tests). Throwaway checks (not committed): all 23 modules import; a FastAPI route through the Starlette test client with httpx 0.28.1 on Python 3.12; PyJWT encode and decode; pwdlib hash and verify with Argon2id; boto3 builds a presigned POST with a size range (local signing); SQLAlchemy 2.1.4 creates an asyncpg engine. Frontend lint and build already passed in `FEAT-1201`.
+- **Found:** Starlette 1.7.0 prints a deprecation warning when its test client runs on `httpx` and asks for `httpx2` instead (PyPI: httpx2 2.13.1, github.com/pydantic/httpx2). `httpx` still works. Logged as `ISS-20261010-1320` for a decision; nothing was added.
+- **Still not proven (as the spec said):** SQLAlchemy with a real Postgres (`FEAT-1204`), the `redis` client with Valkey (`FEAT-1205`), boto3 against SeaweedFS (`FEAT-1209`), aio-pika against RabbitMQ (`FEAT-1213`), OpenTelemetry export to a collector (`FEAT-1205`).
+
 ### Deferred / later (decided to postpone, not Phase 1)
 
 These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.

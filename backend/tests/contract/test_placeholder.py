@@ -1,4 +1,4 @@
-"""Placeholder so the runner collects this level. Delete when the first real contract test is added."""
+"""Placeholder so the runner collects this level; delete with the first real test."""
 
 
 def test_level_is_collected() -> None:
