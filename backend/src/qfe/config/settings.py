@@ -11,6 +11,7 @@ from typing import Literal, Self
 from pydantic import Field, PositiveInt, SecretStr, field_validator, model_validator
 
 from qfe.config.base import QfeSettings, check_secret_url, check_url, url_host
+from qfe.domain import RetryPolicy
 
 # --- Required settings, in groups -------------------------------------------------------------
 
@@ -194,17 +195,35 @@ class SubmitTuning(QfeSettings):
     presigned_download_ttl_seconds: PositiveInt = 5 * 60
     max_file_bytes: PositiveInt = 100 * 1024 * 1024
     max_payload_bytes: PositiveInt = 256 * 1024
-    max_attempts: PositiveInt = 3
 
 
-class RetryTuning(QfeSettings):
-    """Retry delay: base doubling each attempt up to the cap, with random jitter (D15)."""
+class RetryDefaults(QfeSettings):
+    """The default retry policy for a job type that does not define its own (D52 era plan: 3
+    retries after the first run, waiting about 10 seconds, 2 minutes and 10 minutes, jitter about
+    20%). A bad value stops the process at startup."""
 
-    retry_base_delay_seconds: PositiveInt = 10
-    retry_max_delay_seconds: PositiveInt = 5 * 60
+    default_max_attempts: PositiveInt = 4  # the first run plus the retries
+    default_retry_delays_seconds: str = "10,120,600"  # one delay before each retry
+    default_retry_jitter: float = 0.2
+
+    @property
+    def default_retry_policy(self) -> RetryPolicy:
+        delays = tuple(float(part) for part in self.default_retry_delays_seconds.split(","))
+        return RetryPolicy(self.default_max_attempts, delays, self.default_retry_jitter)
+
+    @model_validator(mode="after")
+    def _default_policy_is_valid(self) -> Self:
+        try:
+            _ = self.default_retry_policy
+        except ValueError as error:
+            raise ValueError(
+                "QFE_DEFAULT_MAX_ATTEMPTS, QFE_DEFAULT_RETRY_DELAYS_SECONDS and "
+                f"QFE_DEFAULT_RETRY_JITTER do not make a valid retry policy: {error}"
+            ) from None
+        return self
 
 
-class WorkerTuning(RetryTuning):
+class WorkerTuning(RetryDefaults):
     worker_concurrency: PositiveInt = 1  # D35: safe for heavy work, raised per pool
     lease_seconds: PositiveInt = 60
     heartbeat_interval_seconds: PositiveInt = 20
@@ -220,7 +239,7 @@ class WorkerTuning(RetryTuning):
         return self
 
 
-class MaintenanceTuning(RetryTuning):
+class MaintenanceTuning(RetryDefaults):
     sweep_base_wait_seconds: PositiveInt = 5 * 60  # D27, D38
     sweep_max_wait_seconds: PositiveInt = 60 * 60
     sweep_batch_size: PositiveInt = 100
@@ -251,6 +270,7 @@ class ApiSettings(
     TokenTuning,
     RateLimitTuning,
     SubmitTuning,
+    RetryDefaults,
 ):
     pass
 
