@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 
-import httpx
+import httpx2
 import pytest
 from fastapi import FastAPI
 
@@ -37,15 +37,15 @@ def make_app(*, postgres_ok: bool = True, valkey_ok: bool = True) -> FastAPI:
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[httpx.AsyncClient]:
+async def client() -> AsyncIterator[httpx2.AsyncClient]:
     app = make_app()
 
     @app.get("/boom")
     async def boom() -> None:
         raise RuntimeError("internal detail that must not reach the client")
 
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+    transport = httpx2.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
 
 
@@ -56,21 +56,21 @@ def json_logging(capsys: pytest.CaptureFixture[str]) -> None:
     capsys.readouterr()
 
 
-async def test_healthz_is_ok_and_carries_a_trace_id(client: httpx.AsyncClient) -> None:
+async def test_healthz_is_ok_and_carries_a_trace_id(client: httpx2.AsyncClient) -> None:
     response = await client.get("/healthz")
     assert response.status_code == HTTP_OK
     assert response.json() == {"status": "ok"}
     assert HEX32.match(response.headers["x-trace-id"])
 
 
-async def test_a_valid_traceparent_is_continued(client: httpx.AsyncClient) -> None:
+async def test_a_valid_traceparent_is_continued(client: httpx2.AsyncClient) -> None:
     response = await client.get("/healthz", headers={"traceparent": TRACEPARENT})
     assert response.headers["x-trace-id"] == TRACE_ID
 
 
 @pytest.mark.parametrize("bad", ["garbage", "00-xyz-00f067aa0ba902b7-01", ""])
 async def test_a_malformed_traceparent_starts_a_new_trace_and_is_not_an_error(
-    client: httpx.AsyncClient, bad: str
+    client: httpx2.AsyncClient, bad: str
 ) -> None:
     response = await client.get("/healthz", headers={"traceparent": bad})
     assert response.status_code == HTTP_OK
@@ -87,15 +87,15 @@ async def test_a_malformed_traceparent_starts_a_new_trace_and_is_not_an_error(
     ],
 )
 async def test_readyz(postgres_ok: bool, valkey_ok: bool, status: int, degraded: list[str]) -> None:
-    transport = httpx.ASGITransport(app=make_app(postgres_ok=postgres_ok, valkey_ok=valkey_ok))
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+    transport = httpx2.ASGITransport(app=make_app(postgres_ok=postgres_ok, valkey_ok=valkey_ok))
+    async with httpx2.AsyncClient(transport=transport, base_url="http://test") as http:
         response = await http.get("/readyz")
     assert response.status_code == status
     assert response.json()["degraded"] == degraded
     assert "x-trace-id" in response.headers
 
 
-async def test_metrics_count_requests_by_route_template(client: httpx.AsyncClient) -> None:
+async def test_metrics_count_requests_by_route_template(client: httpx2.AsyncClient) -> None:
     await client.get("/healthz")
     await client.get("/does-not-exist/12345")
     text = (await client.get("/metrics")).text
@@ -106,7 +106,7 @@ async def test_metrics_count_requests_by_route_template(client: httpx.AsyncClien
 
 
 async def test_an_unhandled_error_gives_a_clean_500_with_a_trace_id(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
 ) -> None:
     response = await client.get("/boom")
     assert response.status_code == HTTP_SERVER_ERROR
@@ -116,7 +116,7 @@ async def test_an_unhandled_error_gives_a_clean_500_with_a_trace_id(
 
 
 async def test_the_access_log_line_has_the_same_trace_id_as_the_response(
-    client: httpx.AsyncClient, capsys: pytest.CaptureFixture[str]
+    client: httpx2.AsyncClient, capsys: pytest.CaptureFixture[str]
 ) -> None:
     capsys.readouterr()
     response = await client.get("/healthz", headers={"traceparent": TRACEPARENT})
