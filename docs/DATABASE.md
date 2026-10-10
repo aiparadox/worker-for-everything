@@ -216,7 +216,7 @@ The central table. Read and written constantly.
 | error | jsonb | `{code, message, retryable}` of the last failure |
 | progress | smallint NOT NULL | 0 to 100. Default 0 |
 | attempts | integer NOT NULL | Tries used so far. Default 0 |
-| max_attempts | integer NOT NULL | From the job type's settings at submit time. Counts the first run plus the retries (default plan: 4) |
+| max_attempts | integer NOT NULL | From the job type's settings at submit time. Counts the first run plus the retries. The default is the setting `QFE_MAX_ATTEMPTS` (3 in development, `FEAT-20261010-1203`) |
 | priority | smallint NOT NULL | **Phase 2.** Default 0. Stored now, not used yet |
 | run_at | timestamptz NOT NULL | **Do not run before this time.** Default `now()`. Set to `now() + delay` on a retry (D24). Used from Phase 1. `outbox.run_at` is a copy for fast relay lookups |
 | cancel_requested | boolean NOT NULL | **Phase 2.** Default `false`. Stored now, not used yet |
@@ -233,7 +233,7 @@ The central table. Read and written constantly.
 | finished_at | timestamptz | When it reached a final state |
 | updated_at | timestamptz NOT NULL | |
 
-Checks: `progress BETWEEN 0 AND 100`; `attempts >= 0`; `max_attempts >= 1`; status is one of the allowed values; at most one of `result` and `result_file_id` is set.
+Checks: `trace_id` is 32 lower-case hex characters; `progress BETWEEN 0 AND 100`; `attempts >= 0`; `max_attempts >= 1`; status is one of the allowed values; at most one of `result` and `result_file_id` is set.
 
 Indexes:
 
@@ -426,7 +426,9 @@ Other growth levers, in order of effort: shorter retention; archive old rows to 
 - Large-table changes: add indexes with `CREATE INDEX CONCURRENTLY`; add constraints as `NOT VALID` then `VALIDATE`; avoid rewriting the whole table.
 - Migrations run from a one-shot `migrate` container before the API and workers start.
 - CI runs migrations on an empty database, and also checks that upgrading from the previous release works.
-- Rollback means a new forward migration. Down-migrations are not relied on in production (A9, approved).
+- Rollback means a new forward migration. Down-migrations are not relied on in production (A9, approved). The generated `downgrade()` functions are kept for local use and are not tested.
+- **As built (`FEAT-20261010-1204`):** the schema is written once as SQLAlchemy Core tables in `qfe/adapters/postgres/tables.py`; migrations are generated from it with `alembic revision --autogenerate`, then reviewed and edited. There are three, one per logical group: accounts and auth, files, jobs and outbox. `alembic check` (run by a test) fails if the table definitions and the migrations differ. The migration environment takes a session-level advisory lock so two `migrate` runs never overlap. The roles are created by `deploy/postgres/init/01-roles.sh` on the first start of an empty data folder; `qfe_readonly` is not created yet.
+- Table settings as built: `fillfactor = 80` on `jobs`; on `jobs`, `job_attempts` and `outbox`: `autovacuum_vacuum_scale_factor = 0.02`, `autovacuum_vacuum_threshold = 1000`, `autovacuum_analyze_scale_factor = 0.01` (starting values, to be tuned with real load).
 - Every schema change updates this document in the same commit.
 
 ## 13. Database assumptions and their status
@@ -466,6 +468,6 @@ The full list, with the consequence of each, is in the "Deferred / later" sectio
 
 - Partial indexes, `SKIP LOCKED` and HOT-update behaviour on the `jobs` table under load (docs are known, behaviour is not measured).
 - The advisory lock under PgBouncer transaction pooling, with an integration test. PgBouncer is not needed in the first version; if added, set `max_prepared_statements` to a non-zero value.
-- The Alembic and SQLAlchemy versions together, on the chosen Python.
+- ~~The Alembic and SQLAlchemy versions together, on the chosen Python.~~ **Done 2026-10-10 (`FEAT-20261010-1204`):** SQLAlchemy 2.1.4, asyncpg 0.32.0 and Alembic 1.20.0 on Python 3.12 against PostgreSQL 18.6: upgrade, repeat upgrade, `alembic check` and concurrent upgrades all pass.
 - SeaweedFS lifecycle expiry behaviour.
 - Partitioning by id range (the idea in section 11).
