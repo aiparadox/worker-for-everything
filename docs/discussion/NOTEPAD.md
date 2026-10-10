@@ -20,9 +20,9 @@ Plain English is required for explanations to the user (`CLAUDE.md`, Module 10).
 | Item | State |
 |---|---|
 | **Resume here** | After a compaction or in a new session: read this table, then `TODO.md`, then the section "Decisions after the virtual implementation" (D41 to D44) further down. **Do not start implementing anything until the user says so.** The first work is the "Decide first" group in `TODO.md` (tooling choices, the 10 open questions, SQLAlchemy and S3 client choices). Scratch tools used for the virtual implementation (verify scripts, working ledger) are in the session scratchpad, not in the repo, and are not needed to continue. |
-| Phase of work | Design finished. The task list is approved and written to `TODO.md` (77 items). No product code, no scaffolding, no dependencies installed. |
+| Phase of work | Design finished. The task list is approved and written to `TODO.md` (77 items at first; 85 after the ADR task, the frontend split and the two follow-ups on 2026-10-10, 5 of the first 77 are done: tooling, SQLAlchemy and S3 and test setup, doc updates, supersession notes, ADR list). No product code, no scaffolding, no dependencies installed. |
 | Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D44 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 and corrected on 2026-10-10. The virtual implementation (`docs/virtual-implementation/`, 16 files, 40 findings, 172 assumptions) was written and reviewed. |
-| Waiting on | The user's go-ahead to start. Open decisions, all listed in `TODO.md` under "Decide first": Python tooling (dependency manager, linter, formatter, type checker, CI tool), the 10 questions in `docs/virtual-implementation/findings.md` section 6 (the user has no load numbers yet and does not want to fixate on production), SQLAlchemy 2.1 or 2.0, the S3 client path, and the integration test setup. The user said no code yet. |
+| Waiting on | Still open from "Decide first" in `TODO.md`: the 10 questions in `docs/virtual-implementation/findings.md` section 6 (deferred by the user until after Phase 0; must be settled before the relay, worker and file API specs) and the tuning defaults (to be proposed inside the config module spec). Decided on 2026-10-10: tooling (D45), SQLAlchemy 2.1 (D46), boto3 (D47), Compose test profile (D48), ADR list (D49). The user said no code yet; the frontend wishes below are still being discussed. |
 | Docs state | Both design docs match D19 to D40 as of 2026-10-10. They are drafts until the user approves them. Not pushed to GitHub from this session (no SSH access); the user pushes. |
 | Next step | Work the "Decide first" items in `TODO.md` with the user, one decision at a time, and record each answer as a numbered decision (D45 and on). Then, per item: verify the code or setup, write a short spec in `docs/specs/`, get it approved, and only then implement. |
 | After that | Per item: verify the code or setup, write a short spec in `docs/specs/`, get approval, then implement on the checked-out branch. |
@@ -117,6 +117,8 @@ Each decision lists: what, who decided, why, what was rejected, what it forces e
 
 ### D3. "Dynamic API generation" means user-created platform API keys
 
+> **Partly superseded.** The "browser session" in the Wiring bullet is replaced by access and refresh JWTs (D32, amended by D37 and D40). The meaning of the decision (user-created keys, hashed, shown once) stands.
+
 - **Decided by:** the user, after I offered three readings.
 - **What it means:** a logged-in user creates an API key in the UI at any time. That key is then used to call the platform's APIs, like any real-world platform.
 - **Rejected reading:** generating endpoints per job type. Not wanted.
@@ -156,6 +158,8 @@ Each decision lists: what, who decided, why, what was rejected, what it forces e
 
 ### D7. Email and password login now, OAuth later, behind an `AuthProvider`
 
+> **Partly superseded.** "Sessions are httpOnly cookies" is replaced by D32: a short-lived access JWT kept in browser memory and a refresh JWT in an httpOnly cookie. The Argon2 library is now chosen in D33 (`pwdlib`, to be approved when installed). The email-verification expectation from D21 was replaced by D30. The `AuthProvider` idea stands.
+
 - **Decided by:** the user. Their words: email and password is good for now, but the system should be flexible enough to handle OAuth from various providers later.
 - **Why an adapter:** the login mechanism changes who proves identity but not anything downstream. Putting it behind the `AuthProvider` port means adding Google or GitHub is a new adapter, not a rewrite.
 - **Details:** passwords hashed with Argon2 (planned; library not yet chosen). Sessions are httpOnly cookies for the frontend.
@@ -170,12 +174,16 @@ Each decision lists: what, who decided, why, what was rejected, what it forces e
 
 ### D9. Frontend is Next.js in `frontend/src`
 
+> **Partly superseded.** "Using the browser session cookie" is replaced by D32 (access token in memory, refresh cookie). The Next.js version is no longer unchecked: Next.js 16.x needs Node 20.9 or newer (Phase 0 verification results). Frontend requirements added later (admin and user areas, URL-routable state, rendering, skeletons, design rules) are recorded in D50.
+
 - **Decided by:** the user, who chose Next.js instead of my two options (React with Vite, or server-rendered FastAPI pages).
 - **Scope:** minimal. Signup, login, list API keys, create key (show once), revoke key.
 - **Wiring:** a separate container. It talks to the API like any other client, using the browser session cookie.
 - **Verification status:** Next.js version not yet checked. Node 22 is installed locally, but the version used will be pinned in Docker. Scaffolding will use the framework generator (CLAUDE.md Module 8): do not hand-write the skeleton.
 
 ### D10. Phase 1 versus Phase 2 job features
+
+> **Partly superseded.** There is no dead-letter queue (D25). RabbitMQ delay queues are not used; delays are the `run_at` time on a new outbox row (D22, D24). The phase split itself stands.
 
 - **Decided by:** the user wants everything eventually, but built in phases, with the later items logged. I agreed that phasing is right.
 - **Phase 1:** submit, status and progress by polling, result, retries with backoff, dead-letter queue. Retries and dead-letter were made a default because a queue without them is not usable in the real world.
@@ -229,7 +237,7 @@ Approved content: the data model, the two credential kinds, the key format, obse
 
 ### D15. Design Section 3 approved
 
-> **Partly superseded.** "Ack only after the DB commit" is replaced by D23 (ack right after the claim). RabbitMQ delay queues are replaced by D22 and D24. The dead-letter queue is removed by D25. The rest stands.
+> **Partly superseded.** Do not use the bullets below as they stand where these differ: "Ack only after the DB commit" is replaced by D23 (ack right after the claim). RabbitMQ delay queues are replaced by D22 and D24. The dead-letter queue is removed by D25. The **state machine** bullet is out of date: a retry goes `running` to `retrying` and is claimed from `retrying`; it never returns to `queued` (see `ARCHITECTURE.md` section 5). The **backpressure** bullet is replaced by per-pool concurrency (D35). What still stands: the roadmap, the handler contract, the lease and heartbeat idea, and the error rules.
 
 - **Handler contract and registration:** see D4.
 - **Delivery:** at-least-once. A message is acknowledged only after the worker commits the result to Postgres. A job can therefore occasionally run twice, so **every handler must be safe to run twice** (a hard rule).
@@ -243,11 +251,15 @@ Approved content: the data model, the two credential kinds, the key format, obse
 
 ### D16. Rate limiting is required in Phase 1
 
+> **Partly superseded.** The active-job count is not applied through the `RateLimiter` port; it is counted exactly in Postgres inside the submit transaction (D29). The `RateLimiter` port covers only the request-rate limits. The 429 behaviour stands.
+
 - **Decided by:** the user ("I forgot to add it").
 - **Behaviour:** when a limit is hit the API returns `429 Too Many Requests` with a `Retry-After` header and a JSON error body. Normal responses carry rate limit headers so clients can slow down on their own.
 - **Wiring:** a `RateLimiter` port like every other technology. Applied in API middleware and in the submit-job use case (for the active job count).
 
 ### D17. Redis for rate limit counters; four limits in Phase 1
+
+> **Partly superseded.** The store is Valkey, not Redis (D42); read "Redis" below as Valkey. The "active jobs per organisation" limit is counted in Postgres, not in the store (D29), so only three limits live in Valkey; the fourth request class is refresh and logout (D40). The need for `docs/rate-limits.md` stands.
 
 - **Decided by:** the user approved a **new service (Redis)** and picked all four limits. They noted that all are needed at scale and asked for **proper documentation**.
 - **Why Redis:** it is the standard tool for this. Fast, shared across all API copies, and counters expire on their own.
@@ -532,9 +544,76 @@ The virtual implementation (`docs/virtual-implementation/`) ended with 10 open q
 - **Process rule that follows (CLAUDE.md Module 7):** no item starts until its code or setup has been checked, a short spec exists in `docs/specs/`, and the user has approved the spec. Branch and merge actions happen only when the user asks.
 - **Findings handling:** the 8 High findings are tracked as their own items (F-07, ingress and TLS, sits inside the deferred production item by D43). The other findings are resolved inside the spec of the part they belong to.
 
-### Open: tooling choices not yet discussed
+### D45. Python tooling (2026-10-10)
 
-The dependency manager (for example `uv`, `pip-tools` or `poetry`), the linter and formatter, the type checker, and the CI tool have not been discussed anywhere. They block Phase 0 scaffolding and must be decided with the user.
+- **Decided by:** the user. They chose `uv` first ("let's use uv for it"), then approved the rest of the proposal ("yes, go with mypy and skip pre-commit and the task runner").
+- **What:**
+
+| Need | Choice | Version checked on PyPI 2026-10-10 |
+|---|---|---|
+| Dependency manager and Python installer | uv (`pyproject.toml`, `uv.lock`, Python 3.12 pinned) | 0.13.0 |
+| Linter and formatter | ruff | 0.17.0 |
+| Type checker | mypy, strict mode | 2.4.0 (Production/Stable) |
+| Tests | pytest, pytest-asyncio, pytest-cov | 9.1.1, 1.4.0, 7.1.0 |
+| CI | GitHub Actions (ruff, mypy, unit tests, Docker-based tests) | not applicable |
+
+- **Why mypy and not `ty`:** `ty` (from the makers of uv and ruff) is much faster but still beta (PyPI 0.0.86, "Beta"; stable release targeted for 2026). The project is small, so speed does not matter. Revisit when `ty` is stable.
+- **Not chosen:** pyright (needs Node on the backend side); pre-commit hooks (CI runs the same checks; one less thing to install per machine); a task runner such as make or just (make is not available on the user's Windows machine; commands go in the README and CI calls them directly).
+- **Still to do:** this approves the plan only. No package is installed. Each dependency is approved again when it is added (CLAUDE.md Module 5), and the exact versions are re-checked against Python 3.12 at that time (`FEAT-20261010-1208`). The frontend lint and format tools come from `create-next-app` and are checked when the frontend is scaffolded.
+- **Consequence for the TODO list:** closes `ISS-20261010-1154`. `FEAT-20261010-1201` (repository layout) is no longer blocked by it.
+
+### D46. SQLAlchemy 2.1 (2026-10-10)
+
+- **Decided by:** the user, approving my recommendation.
+- **What:** use SQLAlchemy 2.1 (2.1.0 final was released 2026-09-24; PyPI showed 2.1.4 on 2026-10-10; needs Python 3.11 or newer). Fallback: 2.0.54 (maintenance line) if the Phase 0 trial fails.
+- **Why:** greenfield project; starting on the maintenance line would force a migration later. The release notes say behaviours changed and upgrades should be tested, and they say nothing about asyncpg, so compatibility with asyncpg 0.32.0, Alembic 1.20.0 and Python 3.12 is **not yet confirmed**.
+- **To do:** the trial is part of `FEAT-20261010-1208`. Record the result when it runs. Sources: sqlalchemy.org release post for 2.1.0rc2, docs.sqlalchemy.org/en/21/changelog.
+
+### D47. S3 client: boto3 in a thread pool (2026-10-10)
+
+- **Decided by:** the user, approving my recommendation.
+- **What:** the storage adapter uses `boto3` (1.43.111 on 2026-10-10) and runs its blocking calls through `asyncio.to_thread`. Presigned links are computed locally. Only the adapter knows about boto3; the `StorageAdapter` port stays async.
+- **Why not aiobotocore (3.9.2):** it pins `botocore>=1.43.101,<1.43.107`, which conflicts with the botocore that boto3 1.43.111 needs, it trails boto3, and it pulls in aiohttp, which nothing else needs. This is consistent with the earlier finding to avoid `aioboto3`.
+- **Revisit if:** the thread pool becomes a bottleneck. Only the adapter would change.
+
+### D48. Integration tests start services through a Docker Compose test profile (2026-10-10)
+
+- **Decided by:** the user, approving my recommendation.
+- **What:** integration, contract and end-to-end tests run against services started with `docker compose --profile test up -d --wait`. One stack definition is shared by development, CI and tests. No testcontainers dependency (4.15.0 was the current version).
+- **Why:** the end-to-end tests need the full stack (api, worker, relay, maintenance) anyway; SeaweedFS has no testcontainers module and would need a duplicate setup.
+- **Cost accepted:** someone must start the profile before the tests, and tests must clean up after themselves (for example a fresh database per run). The details go in the test scaffolding spec (`FEAT-20261010-1207`).
+- **Revisit if:** fully self-starting adapter tests are wanted; testcontainers could then be added for those only.
+
+### D49. Which decisions get an ADR (2026-10-10)
+
+- **Decided by:** me, on the user's instruction ("it's for you so decide"). The user can still change the list.
+- **Rule used (CLAUDE.md Module 7):** an ADR is for an architecture or design decision: a new dependency category, a data-model shift, or a cross-cutting pattern. Tooling choices (D45), library versions (D46, D47) and test setup (D48) do not get one; this notepad is their record.
+- **The six ADRs, in `docs/adr/`** (the D numbers are the notepad entries each one summarises; the outbox itself is described across D22 and D23, and the entry that first chose it must be found when the ADR is written):
+  1. `0001` Transactional outbox, ack-after-claim, leases and recovery (D22, D23, D24, D27).
+  2. `0002` RabbitMQ with one durable queue per job type and no dead-letter queue (D5, D25, D28).
+  3. `0003` Ports and adapters, with handlers as plugins inside workers (D4, D5).
+  4. `0004` Authentication model: access and refresh JWTs, refresh rotation, hashed API keys (D3, D32, D37, D40).
+  5. `0005` Postgres as the source of truth: UUIDv7 keys generated by Postgres, conventions for statuses, times and hashes (D13, D41).
+  6. `0006` Choice of external services: SeaweedFS for files, Valkey for rate limits (D17, D20, D42).
+- **When they are written:** not all up front. Each ADR is written just before the first spec it affects (Module 7: the ADR comes first and the spec follows it). The content already exists in this notepad, so each one is a short rewrite. Writing them is not yet a task in `TODO.md`; it is proposed to the user.
+
+### D50. Frontend requirements (2026-10-10)
+
+- **Raised by:** the user. Their five points, in my words: (1) two main areas: an admin / platform-admin area and the user-facing area, each possibly with its own sub-areas; the user-facing area is what is being built now; (2) everything URL-routable: pages, components, sections, modals and their state, applied filters; (3) use proper rendering techniques for performance; (4) skeleton loaders, transitions and animation for visual quality; (5) follow standard frontend design principles; plus: research the frontend and give an opinion.
+- **Status:** decided on 2026-10-10 by the user's answers to my five questions (below). The points 3 to 5 are guidelines for the frontend spec, not yet detailed.
+- **Answers:**
+  1. **Admin area:** reserve the structure now (a separate `(admin)` route group with its own layout), build it later. Building it needs a platform-admin role and admin APIs, which do not exist yet.
+  2. **Rendering and auth:** keep D32. Logged-in pages fetch data in the browser with the in-memory access token; the static page shell and skeletons come from the server. The backend-for-frontend option was not chosen; revisit it later if server-rendered data becomes important.
+  3. **Organisation in the URL:** yes, as the first path segment, but **without a word that says what it is**: `/<org_id>/jobs`, not `/organisations/<org_id>/jobs`. The user's reason: do not advertise that the segment is an organisation id (they said it does not matter for security). Note: ids are UUIDv7 (time-ordered), so the id also shows when the organisation was created; accepted.
+  4. **Jobs pages and files pages:** both are wanted in Phase 1, each as its own task.
+  5. **Split of the Phase 1 frontend task:** approved (foundation; signup, login and API keys; jobs pages; files pages; admin later).
+- **Rules to carry into the frontend spec:** filters, sort, page, tabs and modal open state live in the URL (candidate library `nuqs`, modals as parallel and intercepting routes); the one-time API key and form text never go in a URL; skeletons match the final layout and respect reduced-motion; accessibility target WCAG 2.2 AA; one convention document `docs/FRONTEND.md`. Candidate libraries (not verified, none approved): Tailwind with shadcn/ui, TanStack Query, react-hook-form with zod. Each needs approval before install (Module 5).
+- **My main findings (details to be written when decided):**
+  - D32 keeps the access token in browser memory, so pages that need the user's data can only be rendered in the browser; server rendering helps only public pages and the page shell. Using Next.js as a backend-for-frontend (it holds the cookie and calls the API) would allow server rendering but reworks the approved auth design.
+  - There is no platform-admin role in the data model yet (`memberships` roles are organisation roles). An admin area needs one, plus admin APIs. That ties to finding question 9 (roles and scopes).
+  - URL state: filters, tabs, sort, page and modal state belong in the URL; secrets (the one-time API key) and form text must never be.
+  - The approved Phase 1 frontend (`FEAT-20261010-1222`) is only signup, login and API keys; these wishes make it much bigger.
+- **Still open:** which UI libraries (each needs approval, Module 5), decided in the frontend spec; nothing else. Decided later the same day: users can list files and submit jobs from the UI, but neither is needed for Phase 0. Logged as `FEAT-20261010-1317` (list-files endpoint, with the file API) and `FEAT-20261010-1318` (job submit form, after the jobs pages, job API and files pages).
 
 ### Deferred / later (decided to postpone, not Phase 1)
 
