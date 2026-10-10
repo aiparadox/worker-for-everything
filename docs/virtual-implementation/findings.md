@@ -16,7 +16,7 @@ How to read it:
 | Every `ARCH`, `DB` and `NOTEPAD` tag points at a real heading, table, column or decision | Script run over all 15 files | 0 unresolved. The four hits were the placeholder examples in the legend of `overview.md` |
 | Every cross-part interface reference (the `part#interface` tags) is defined in the owner's section 2 | Script | 70 distinct references, 0 unresolved |
 | Interface names in the overview exist in the owner file | Script | 0 missing after the overview was brought in line with the part files (22 connection rows became 29; the catalogue was rewritten) |
-| Columns in `DATABASE.md` that no part mentions | Script | Only audit timestamps (`created_at`, `updated_at`), `users.email_verified_at` (deliberately empty) and `jobs.cancel_requested` (Phase 2). One real gap: nothing says what maintains `jobs.updated_at` (F-35) |
+| Columns in `DATABASE.md` that no part mentions | Script | Only audit timestamps (`created_at`, `updated_at`), `users.email_verified_at` (deliberately empty) and `jobs.cancel_requested` (Phase 2). One real gap: nothing says what maintains `jobs.updated_at` (F-34) |
 | Every part named in `ARCHITECTURE.md` has a file | Manual | Containers and adapters all map to a part. Gaps: `domain/` has no owner (F-22) and `handlers/` is folded into `worker` [ARCH: 6. Code structure and the adapter rule] |
 | Producer output matches consumer input at each connection | Manual, row by row | Matches, except: the delivery object lacks the routing key the worker relies on (F-21); `max_attempts` has two authorities (F-12); the worker never names the `gate` that the queue adapter asks for (F-21) |
 | No deferred item silently assumed decided | Manual, 31 distinct `DEFERRED` tags | None found. Each part states the Phase 1 behaviour next to the deferral |
@@ -54,17 +54,17 @@ Severity: **High** = likely to cause an incident or break a guarantee in normal 
 
 | # | Severity | Category | Where | Problem | Suggested fix | Blocks which deferred item |
 |---|---|---|---|---|---|---|
-| F-01 | High | Correctness | `job-api.md` §5.1; `ARCHITECTURE.md` §5, §7, §11 | A repeated submit is not safe. File checks (storage calls) run before the transaction, and the idempotency lookup runs inside it, so a repeat redoes the storage work and can fail on a purged or changed file instead of returning the existing job, which §7 promises. [ARCH: 5. Life of a job] [ARCH: 7. Data model] [ARCH: 11. Reliability and delivery] [CONFLICT C-02] | Look up `(organisation_id, idempotency_key)` first, read-only and before any file work, and return the existing job. Keep the locked re-check inside the transaction for races | None |
 | F-02 | High | Availability | `outbox-relay.md` §6; `DATABASE.md` §4.11 | A row that cannot be published stays due. The relay orders by `run_at, id` and re-selects it every cycle with no backoff, so enough such rows fill the batch and publishing stops for everyone. [DB: outbox.run_at; §4.11] [ARCH: 11. Reliability and delivery] [ASSUMPTION RLY-03] | On a failed publish push the row out (`run_at = now() + backoff`, capped) so it leaves the head. Alert on `publish_attempts` above a threshold | Failing a job after N failed publishes |
 | F-03 | High | Availability | `outbox-relay.md` §6, §8 | The batch transaction and its row locks stay open while the relay waits on the broker. With the broker down, one batch can hold them for batch size times the publish timeout (100 rows and a 10 second timeout, my numbers, is about 17 minutes). [DB: outbox; §4.11 rules] [ASSUMPTION RLY-04] [ASSUMPTION RLY-05] | Stop the cycle after the first few failures. Or claim rows with a short lease update, commit, publish outside the transaction, then mark | None |
 | F-04 | High | Correctness | `worker.md` §6; `ARCHITECTURE.md` §10, §11 | Heartbeats cannot run if a handler blocks the event loop, which OCR code does. The lease expires, recovery requeues a job that is still running, and it runs twice. The sources do not say where handlers run, how a timeout is enforced, or how a running handler is stopped. [ARCH: 11. Reliability and delivery] [ASSUMPTION A-13] [ASSUMPTION WK-02] [ASSUMPTION WK-08] | Run handlers in a thread or child process, heartbeat from the event loop, and kill the handler on timeout or lease loss | None |
-| F-05 | High | Correctness | `worker.md` §6; `DATABASE.md` §5 | A worker stopped on purpose (deploy, scale-in) leaves its lease to expire. The attempt was counted at claim, so every deploy burns one attempt, and with `max_attempts` of 4 a few deploys fail healthy jobs. [DB: jobs.attempts; §5 Worker claim] [DB: jobs.lease_expires_at; §5 Recover] [ASSUMPTION WK-05] | Graceful shutdown: finish the job, or release the lease with a new operation that sets `retrying` without consuming an attempt. Do not count `lease_lost` attempts against `max_attempts` | None |
+| F-05 | High | Correctness | `worker.md` §6; `DATABASE.md` §5 | A worker stopped on purpose (deploy, scale-in) leaves its lease to expire. The attempt was counted at claim, so every deploy burns one attempt, and with `max_attempts` of 4 a few deploys fail healthy jobs. [DB: jobs.attempts; §5 Worker claim] [DB: jobs.lease_expires_at; §5 Recover] [ASSUMPTION WK-05] | On stop, release the lease with a new operation that returns the job to `retrying` without consuming an attempt (snippet 7.3). Docker stops a container after 10 seconds by default (30 on Windows), so set a longer stop timeout, but a full drain is impractical for long jobs; release is the realistic path. Do **not** stop counting `lease_lost` attempts: a job that kills its worker every time would then never fail [ASSUMPTION WK-05] | None |
 | F-06 | High | Security | `rate-limiter.md` §6; `accounts-auth.md` §8 | Requests with bogus credentials are never limited. Key limits need a valid key, and the IP limits cover only login, signup, refresh and logout, yet each bogus API call costs a database read. [ARCH: 9. Rate limiting] [ASSUMPTION RL-06] [ASSUMPTION AA-14] [ASSUMPTION DA-18] | Add an IP-based limit on unauthenticated and failing requests, before the lookup, and a short negative cache for unknown prefixes | Trusted-proxy setting and per-email login limit |
 | F-07 | High | Deployment | `platform.md` §2.1, §9; `ARCHITECTURE.md` §4, §8, §9 | No ingress, reverse proxy or TLS terminator is in the topology, yet the `Secure` cookie, the same-site rule, per-IP limits and the public presigned storage URL all assume one. [ARCH: Containers (Docker Compose)] [ARCH: 8. Authentication and authorisation] [ARCH: 9. Rate limiting] [ASSUMPTION PLT-05] | Add an ingress to the topology and decide its trusted-proxy handling in Phase 1, or label Phase 1 development-only | Trusted-proxy setting and per-email login limit |
-| F-08 | Medium | Missing flow | `file-api.md` §1, `worker.md` §5.4; `ARCHITECTURE.md` §17 | Result files have no flow. Nothing says who creates a `files` row of kind `result`, how the object is written, or how the link is found, yet Phase 1 ships a sample handler that uses files. [DB: files.kind] [ARCH: 17. Roadmap] [ASSUMPTION A-11] [ASSUMPTION WK-03] | Define one interface that registers a result file (row plus object) and have the worker call it; say who decides inline versus file | None |
+| F-08 | High | Missing flow | `file-api.md` §1, `worker.md` §5.4, `storage-adapter.md` §2; `ARCHITECTURE.md` §10, §17 | Result files have no flow. Nothing says who creates a `files` row of kind `result`, how the object and the row are written together, or how a handler turns a `FileRef` into a storage key, and Phase 1 ships a sample handler that uses files. Handlers also receive the raw storage adapter, not a view limited to their organisation's keys, so a handler bug can read another tenant's objects. [DB: files.kind] [ARCH: 10. Job types and handlers (how new work plugs in)] [ARCH: 17. Roadmap] [ASSUMPTION A-11] [ASSUMPTION WK-03] [ASSUMPTION SA-03] | Give the handler context a files object with two calls: open an input from a `FileRef` (checked to belong to the job's organisation) and save a result (writes the object and an `available` row together and returns the id). Restrict storage access to the organisation's key prefix | None |
+| F-38 | High | Availability | `worker.md` §5.3, §6; `ARCHITECTURE.md` §10, §11 | A hung handler is never recovered. The heartbeat keeps extending the lease while the handler spins, and nothing enforces `timeout`, so the job stays `running` and the worker (at concurrency 1, the whole process) is lost for good. [ARCH: 10. Job types and handlers (how new work plugs in)] [ARCH: 11. Reliability and delivery] [ASSUMPTION WK-08] [ASSUMPTION WK-02] | Put a hard runtime cap on each attempt: stop extending the lease after `timeout` and kill the handler. This needs the child-process model from F-04 | None |
+| F-01 | Medium | Correctness | `job-api.md` §5.1; `ARCHITECTURE.md` §5, §7, §11 | A repeated submit is not safe. File checks (storage calls) run before the transaction, and the idempotency lookup runs inside it, so a repeat redoes the storage work and can fail on a purged or changed file instead of returning the existing job, which §7 promises. [ARCH: 5. Life of a job] [ARCH: 7. Data model] [ARCH: 11. Reliability and delivery] [CONFLICT C-02] | Look up `(organisation_id, idempotency_key)` first, read-only and before any file work, and return the existing job. Keep the locked re-check inside the transaction for races | None |
 | F-09 | Medium | Data lifecycle | `maintenance.md` §1, §5.4; `DATABASE.md` §10 | Nothing deletes files that jobs used or files marked `available` that no job ever used. The rule "removed with the last job that uses them" has no mechanism, the job and link rows cascade away, and the lifecycle rule removes objects but not rows. [DB: 10. Retention and cleanup; files] [DB: job_files] [CONFLICT C-05] [ASSUMPTION FA-10] [ASSUMPTION DA-07] | Add a files cleanup chore ordered by foreign keys: files unreferenced for a period, then their objects. Say whether `expires_at` is cleared on `available` | Organisation and user deletion flow |
-| F-10 | Medium | Security | `storage-adapter.md` §7; `file-api.md` §7 | An upload link stays valid after the file is checked, so the bytes can change between the check and the worker's read. [NOTEPAD: D36] [ASSUMPTION SA-05] | Keep link lifetimes short, record the object's ETag at the check and compare it in the worker, or copy the object to a validated key | None |
-| F-11 | Medium | Delivery | `queue-adapter.md` §2.1, §2.3, §5.3 | The guarantees rest on settings the sources never state: persistent messages (without them a broker restart empties durable queues), a prefetch of 1 (without it "at most one unclaimed message per queue" is false), and the order cancel-before-ack (without it each busy worker holds a prefetched message for the whole job). [ARCH: 11. Reliability and delivery] [ASSUMPTION QA-02] [ASSUMPTION QA-03] [ASSUMPTION QA-05] | State all three in section 11. Add them to the `QueueAdapter` contract suite | None |
+| F-11 | Medium | Delivery | `queue-adapter.md` §2.1, §2.3, §5.3 | The guarantees rest on settings the sources never state: persistent messages (without them a broker restart empties durable queues), a prefetch of 1 (without it "at most one unclaimed message per queue" is false), and the order cancel-before-ack (without it each busy worker holds a prefetched message for the whole job). [ARCH: 11. Reliability and delivery] [ASSUMPTION QA-02] [ASSUMPTION QA-03] [ASSUMPTION QA-05] | State all three in section 11 and add them to the `QueueAdapter` contract suite, or pick another consume design (snippet 7.15) | None |
 | F-12 | Medium | Consistency | `job-type-registry.md` §4, `worker.md` §5.4 | `max_attempts` has two authorities: the copy on the job and the value in the definition. The worker decides with the job's value, then asks `next-retry-delay`, which may use the definition's value and answer `no-more-retries` (or the reverse). [DB: jobs.max_attempts] [ARCH: 10. Job types and handlers (how new work plugs in)] [ASSUMPTION JTR-05] | Make `next-retry-delay` take `max_attempts` and `retry_delays` from the job (snapshot both at submit), or return only a delay | None |
 | F-13 | Medium | Enforcement gap | `data-access.md` §2.1; `accounts-auth.md` §2.7 | `organisations.status = suspended` is said to "block an organisation's API access", but no interface sets it and the key check does not read it. `users.status` has the same gap. [DB: organisations.status] [DB: users.status] [ASSUMPTION DA-05] [ASSUMPTION AA-12] | Have `find-api-key-by-prefix` return organisation and creator status, reject suspended or disabled, and say who sets them | None |
 | F-14 | Medium | Authorisation | `accounts-auth.md` §2.5; `job-api.md` §2 | Roles (`owner`, `admin`, `member`) have no listed permissions, and the sources give the scope of only one endpoint (`GET /v1/files/{id}` needs `files:read`). Which credential kind `GET /v1/job-types` accepts is unknown. [DB: memberships.role] [ARCH: 14. API documentation rules] [ASSUMPTION AA-05] [ASSUMPTION A-14] | Add a table: endpoint, credential kind, scope, minimum role | None |
@@ -81,11 +81,14 @@ Severity: **High** = likely to cause an incident or break a guarantee in normal 
 | F-25 | Medium | Security | `accounts-auth.md` §2.10, §9; `frontend.md` §9 | The origin check has no owner or allowed-origin list, and the access token in page memory can be read by injected script with no content-security policy described. [ARCH: 16. Security notes] [ASSUMPTION AA-07] [ASSUMPTION AA-15] [ASSUMPTION FE-05] | Assign the check to middleware with a configured allowlist; specify a content-security policy | Token-based CSRF protection |
 | F-26 | Medium | Security | `job-api.md` §9 | `jobs.error` carries `message` text from handlers and libraries and is returned to clients. It may leak internals or other tenants' data. [DB: jobs.error] [ASSUMPTION JA-10] | Return an error code and a filtered message; keep full text in logs | None |
 | F-27 | Medium | Abuse | `file-api.md` §8; `rate-limiter.md` §1 | No limit on storage per organisation or on files per organisation: rate limits count requests, not bytes, and `available` files persist. [ARCH: 9. Rate limiting] [ASSUMPTION FA-09] [ASSUMPTION RL-11] | Add a per-organisation storage and file-count quota | Billing and usage metering |
-| F-28 | Medium | Contract | `file-api.md` §2.1; `storage-adapter.md` §2 | The upload link shape is unsettled: the decision names a "presigned upload URL", the verification result says to use a presigned POST policy (URL plus form fields) so a size range is enforced. [NOTEPAD: D31] [NOTEPAD: Phase 0 verification results] [CONFLICT C-04] | Decide on the POST policy and write the response shape | None |
 | F-29 | Medium | Contract | `job-api.md` §5.1 | `request_hash` is computed from "type and payload" without a canonical form, so key order or whitespace can turn a true repeat into a false conflict. [DB: jobs.request_hash] [ASSUMPTION JA-02] | Hash a canonical JSON serialisation | None |
-| F-30 | Medium | Documentation | `NOTEPAD.md` D3, D7, D9, D10, D15, D16, D17, D27 | Stale entries contradict later decisions and carry no supersession note: D15's state machine sends `retrying` back to `queued`; D10 still lists a dead-letter queue and `run_at` as unused; D3, D7 and D9 describe a browser session cookie; D16 and D17 route the active-jobs count through the rate limiter; D27 names outbox-based counting. A new session reading them would build the old design. [NOTEPAD: D15] [NOTEPAD: D10] [NOTEPAD: D7] [NOTEPAD: D16] [NOTEPAD: D17] [NOTEPAD: D27] [CONFLICT C-03] | Add supersession notes (snippet in section 7) | None |
+| F-30 | Medium | Documentation | `NOTEPAD.md` D3, D7, D9, D10, D15, D16, D17 | Several entries contradict later decisions. D3, D7, D9, D10, D16 and D17 carry no supersession note. D15 has one, but it says "the rest stands" while the entry still contains the old state machine (`retrying` back to `queued`) and "worker prefetch is limited". D27 has a note, but its "Finds" bullet is still the old text. A new session reading them could build the old design. [NOTEPAD: D15] [NOTEPAD: D10] [NOTEPAD: D7] [NOTEPAD: D16] [NOTEPAD: D17] [NOTEPAD: D27] [CONFLICT C-03] | Add the missing notes and correct D15's (snippet 7.11) | None |
 | F-31 | Medium | Operations | `platform.md` §4, §9, §10 | Backups and restore, secret delivery and rotation, published ports, and the CI tool are not described anywhere. [ARCH: 15. Configuration] [ASSUMPTION PLT-02] [ASSUMPTION PLT-06] [ASSUMPTION PLT-09] [ASSUMPTION PLT-10] | Decide them in Phase 0 and record them | None |
 | F-32 | Medium | Security | `accounts-auth.md` §9; `platform.md` §6 | The JWT algorithm, secret rotation and clock-skew leeway are unstated; a rotated secret invalidates every token. [ARCH: 8. Authentication and authorisation] [ASSUMPTION AA-06] [ASSUMPTION PLT-07] | Choose the algorithm, allow two valid secrets during rotation, set a small leeway | Asymmetric JWT signing and a key id |
+| F-39 | Medium | Contract | `accounts-auth.md` §2.4; `ARCHITECTURE.md` §8 | Logout cannot reliably find the token family. The refresh cookie is sent only to the refresh path, logout is a different endpoint, and an expired access token has no usable `fam` claim. [ARCH: 8. Authentication and authorisation] [ASSUMPTION A-05] | Either widen the cookie path to cover logout, or have the frontend refresh first and log out with the new token's `fam` | None |
+| F-40 | Medium | Observability | `outbox-relay.md` §2.2; `ARCHITECTURE.md` §12 | The "stuck outbox rows" alert has no definition and would not catch a dead relay. [ARCH: 12. Observability] [ASSUMPTION RLY-07] | Alert on the age of the oldest due, unpublished row (now minus its `run_at`) | None |
+| F-10 | Low | Security | `storage-adapter.md` §7; `file-api.md` §7 | An upload link stays valid after the file is checked, so the bytes can change between the check and the worker's read. [NOTEPAD: D36] [ASSUMPTION SA-05] | Keep link lifetimes short, record the object's ETag at the check and compare it in the worker, or copy the object to a validated key | None |
+| F-28 | Low | Contract | `file-api.md` §2.1; `storage-adapter.md` §2 | `ARCHITECTURE.md` §18 item 4 already says to use a presigned POST policy for the upload size limit. What is left is D31's older wording ("a presigned upload URL") and that the response must then carry form fields as well as a URL. [ARCH: 18. Open items] [NOTEPAD: D31] [CONFLICT C-04] | Update D31's wording and state the response shape | None |
 | F-33 | Low | Contract | `rate-limiter.md` §2.2; `ARCHITECTURE.md` §3, §9, §17; `DATABASE.md` §6, §7 | The number of Redis limits is stated as three, four, and "all four" in different places, while the table lists four Redis classes plus the Postgres cap. [ARCH: 9. Rate limiting] [ARCH: 17. Roadmap] [DB: 6. The active-jobs cap (D29)] [NOTEPAD: D17] [CONFLICT C-01] | State "four Redis classes and one Postgres cap" everywhere | None |
 | F-34 | Low | Data | `data-access.md` §2 | Nothing says how `jobs.updated_at` and other `updated_at` columns are maintained (trigger or every statement). [DB: jobs.updated_at] [DB: 2. Conventions] | State a trigger or a rule that every update sets it | None |
 | F-35 | Low | Observability | `observability.md` §8 | No sampling or log-level policy, and `jobs_failed_total` has no bounded error-code list. [ARCH: 12. Observability] [ASSUMPTION OBS-03] [ASSUMPTION OBS-04] | Define a small set of error codes and a sampling rule | None |
@@ -123,8 +126,8 @@ Risks the documents already accept by decision, listed so nobody rediscovers the
 |---|---|---|---|
 | C-01 | `ARCHITECTURE.md` §9 and §17, `DATABASE.md` §6 and §7, `NOTEPAD.md` D17 and D29 | §9 says "Three request-rate limits live in Redis" but its table has four Redis rows; §17 says "all four limits"; DB §6 says Redis keeps "only the three"; D17 says "four limits". [ARCH: 9. Rate limiting] [ARCH: 17. Roadmap] [DB: 6. The active-jobs cap (D29)] [NOTEPAD: D17] | `rate-limiter.md` §2.2 |
 | C-02 | `ARCHITECTURE.md` §5 against §7 and §11 | §5 puts file checks before the transaction; §7 says a retried submit "gets the same job back"; §11 says the key is checked "under the organisation lock". [ARCH: 5. Life of a job] [ARCH: 7. Data model] [ARCH: 11. Reliability and delivery] | `overview.md` F4, `job-api.md`, `file-api.md` |
-| C-03 | `NOTEPAD.md` D3, D7, D9, D10, D15, D16, D17, D27 against D22 to D40 | Stale text with no supersession note; see F-30. [NOTEPAD: D15] [NOTEPAD: D10] [NOTEPAD: D7] [NOTEPAD: D16] [NOTEPAD: D27] | This file only |
-| C-04 | `NOTEPAD.md` D31 against "Phase 0 verification results", and `DATABASE.md` §4.7 | D31 says "presigned upload URL"; requirement 7 says to use a presigned POST policy; DB §4.7 says the real size "must match the declared limit" without saying declared size or the cap. [NOTEPAD: D31] [NOTEPAD: Phase 0 verification results] [DB: files.size_bytes] | `overview.md` F4, `storage-adapter.md`, `file-api.md` |
+| C-03 | `NOTEPAD.md` D3, D7, D9, D10, D15, D16, D17, D27 against D22 to D40 | Stale text. D3, D7, D9, D10, D16 and D17 have no supersession note; D15's note says "the rest stands" while the entry still holds the old state machine and prefetch backpressure; D27 has a note but keeps the old "Finds" bullet. See F-30. [NOTEPAD: D15] [NOTEPAD: D10] [NOTEPAD: D7] [NOTEPAD: D16] [NOTEPAD: D27] | This file only |
+| C-04 | `NOTEPAD.md` D31 against `ARCHITECTURE.md` §18, and `DATABASE.md` §4.7 | Narrower than first reported. `ARCHITECTURE.md` §18 item 4 already says to use a presigned POST policy for the upload size limit; what remains is D31's older wording ("a presigned upload URL"), the response shape that a POST policy needs, and DB §4.7 saying the real size "must match the declared limit" without saying declared size or the cap. [ARCH: 18. Open items] [NOTEPAD: D31] [DB: files.size_bytes] | `overview.md` F4, `storage-adapter.md`, `file-api.md` |
 | C-05 | `DATABASE.md` §10 against §4.7, §4.8, §4.9 | §10 says used files are "removed with the last job that uses them, via `job_files`", but `job_files` rows cascade away with the job and the foreign keys keep the file rows, so no step deletes them. [DB: 10. Retention and cleanup; files] [DB: job_files] [DB: jobs.result_file_id] | `data-access.md`, `maintenance.md`, `file-api.md`, `overview.md` |
 
 The tag `[CONFLICT DA-C1]` in the legend of `overview.md` is only an example of the syntax.
@@ -381,7 +384,7 @@ Every `ASSUMPTION` ID used in the folder, one line each. Where the sources are s
 ## 6. Questions for me (prioritised)
 
 1. **Load.** What are your real targets for submits per second, concurrent running jobs, organisations and retention? Everything in section 3 scales from my numbers.
-2. **Handler execution and shutdown.** Do handlers run in a thread or a child process, how is a timeout enforced, and should a deploy that stops a worker consume an attempt? (F-04, F-05)
+2. **Handler execution and shutdown.** Do handlers run in a thread or a child process, how are a timeout and a hung handler stopped, and should a deploy that stops a worker consume an attempt? (F-04, F-05, F-38)
 3. **Connections.** How many worker processes will the largest pool have? Should PgBouncer or one shared connection per process be in the first version? (K-01)
 4. **What sits in front of the API in production,** and should the trusted-proxy setting and a limit on bogus credentials move into Phase 1? (F-06, F-07)
 5. **Result files.** Who creates them and how are they read back? This blocks the Phase 1 sample handler. (F-08)
@@ -413,6 +416,9 @@ Each snippet is a suggestion for a change to `ARCHITECTURE.md`, `DATABASE.md` or
 ```text
 - On a failed publish the relay sets run_at = now() + backoff (capped) and raises
   publish_attempts, so a failing row leaves the head of the queue.
+  Note: this makes outbox.run_at later than jobs.run_at for that row, so the sentences
+  "same value as jobs.run_at" in DATABASE.md §4.11 and §5 need rewording. Correctness is
+  unaffected, because the claim only checks jobs.run_at.
 - The relay stops a cycle after K consecutive failed publishes.
 - Index for cleanup: CREATE INDEX outbox_published_idx ON outbox (id) WHERE published_at IS NOT NULL;
 ```
@@ -421,8 +427,17 @@ Each snippet is a suggestion for a change to `ARCHITECTURE.md`, `DATABASE.md` or
 
 ```text
 | Release (worker shutting down) | Guarded by the lease token. Set retrying, run_at = now(),
-  attempts = attempts - 1, close the job_attempts row as released, insert an outbox row
-  (reason = recovery) | One transaction. A planned stop does not consume an attempt |
+  close the job_attempts row with outcome released, insert an outbox row (reason = recovery),
+  and reduce attempts by one so the attempt is not consumed | One transaction. A planned
+  stop does not consume an attempt |
+
+Two changes are needed with it, or the decrement breaks the unique index on
+(job_id, attempt_number):
+- A claim takes attempt_number = max(attempt_number) + 1 for the job, so numbers are never
+  reused after a release.
+- DATABASE.md §4.10: add released to the outcome list.
+Recovery of a dead worker keeps counting its attempt (lease_lost), so a job that kills its
+worker every time still fails after max_attempts.
 ```
 
 ### 7.4 `ARCHITECTURE.md` §11, delivery settings (F-11, F-21)
@@ -485,8 +500,44 @@ D3  > Superseded in part by D32: the frontend uses an access token plus a refres
 D7  > Superseded in part by D32: "Sessions are httpOnly cookies" no longer holds.
 D9  > Superseded in part by D32: same.
 D10 > Superseded in part: no dead-letter queue (D25); run_at is used from Phase 1 (D24).
-D15 > State machine bullet superseded: a retry goes retrying -> running, never back to queued.
+D15 > Correct the existing note, which says "the rest stands": the state machine bullet is
+      also superseded (a retry goes retrying -> running, never back to queued) and so is
+      "worker prefetch is limited" (see D23 and D35).
 D16 > Superseded by D29: the active-jobs count is not applied through the RateLimiter.
 D17 > Superseded by D29 for the active-jobs row; refresh and logout were added by D40.
-D27 > The "Finds" bullet and the outbox index are superseded by D38.
+D27 > Already carries an "Amended by D38" note; no change needed.
 ```
+
+### 7.12 `ARCHITECTURE.md` §10 and §11, hard runtime cap (F-38)
+
+```text
+- Each attempt has a hard runtime cap. After timeout the worker stops extending the lease
+  and terminates the handler (which therefore runs in a child process or thread it can stop).
+  The attempt is recorded with outcome timeout and follows the normal retry rules.
+```
+
+### 7.13 `ARCHITECTURE.md` §8, logout (F-39)
+
+```text
+- Logout is called with the access token. If it has expired, the frontend refreshes first,
+  then logs out with the new token's fam claim. The refresh cookie stays limited to the
+  refresh path.
+```
+
+### 7.14 `ARCHITECTURE.md` §12, relay lag alert (F-40)
+
+```text
+- Alert on the age of the oldest due, unpublished outbox row (now minus run_at). It catches
+  a stopped relay as well as rows that keep failing.
+```
+
+### 7.15 Consuming without holding a message (F-11)
+
+The cancel-then-resume sequence is fragile, and a prefetch of 0 cannot be used to pause
+because RabbitMQ treats 0 as unlimited. Polling with `basic.get` is not a simple fix
+either: RabbitMQ calls it "highly discouraged" and "very inefficient", and idle polling
+wastes capacity when queues are often empty. Options to settle in a spec, with a benchmark:
+(a) keep consumers, prefetch 1, cancel before the ack that fills the last place;
+(b) pull with a backoff for heavy, long-job pools only;
+(c) keep one prefetched message while busy and raise `consumer_timeout` above the longest
+job, accepting that the held message waits behind a running job. [ASSUMPTION QA-05]

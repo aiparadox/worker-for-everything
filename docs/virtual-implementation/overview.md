@@ -321,10 +321,10 @@ These are the ones raised by this file. Every assumption and conflict from all 1
 | A-12 | Assumption | Which processes expose `/metrics` and the health endpoints, and who may reach them | Section 4 row 21 |
 | A-13 | Assumption | Whether handlers run on the worker's event loop, a thread or a process, and so whether heartbeats keep running during a blocking handler | Section 4 row 19 |
 | A-14 | Assumption | Which scope each endpoint requires (only `GET /v1/files/{id}` needing `files:read` is stated) and which credential kind each endpoint accepts, including `GET /v1/job-types` | F4 step 1 |
+| C-02 | Conflict | A repeated submit performs file checks before the idempotency check, yet the design promises the same job back | F4 step 8 |
+| C-04 | Conflict | `ARCHITECTURE.md` section 18 already says to use a presigned POST policy; the older decision D31 still says "a presigned upload URL", and a POST policy needs form fields in the response | F4 step 2 |
 
 ID A-03 is not used (it was merged into A-02).
-| C-02 | Conflict | A repeated submit performs file checks before the idempotency check, yet the design promises the same job back | F4 step 8 |
-| C-04 | Conflict | The decision says a presigned upload URL; the verification result says a presigned POST policy | F4 step 2 |
 
 Conflicts C-01 (count of Redis limits), C-03 (stale notepad entries) and C-05 (file removal mechanism) concern text outside the flows above and are written up in the part files and `findings.md`. They were already named in Phase 1.
 
