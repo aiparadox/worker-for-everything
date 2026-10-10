@@ -58,6 +58,12 @@ mypy_path = "src"
 files = ["src/qfe", "tests"]
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# boto3 ships no type information; the type stubs are a separate package that is not on the
+# approved dependency list (D47: boto3 only inside the storage adapter).
+module = ["boto3", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

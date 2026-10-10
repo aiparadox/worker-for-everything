@@ -695,6 +695,21 @@ The virtual implementation (`docs/virtual-implementation/`) ended with 10 open q
 - **Change from the spec:** the spec said the database would be migrated once and truncated between tests. `FEAT-1204` already gives each test its own database cloned from a migrated template, which is stronger isolation and just as fast, so truncation was not built. RabbitMQ, Valkey and storage isolation (unique name prefixes, cleanup) is left to the adapter tasks that first use them (`FEAT-1213`, `FEAT-1214`, `FEAT-1219`), where the real names exist.
 - **Not done here, by design:** the GitHub Actions workflow (`FEAT-20261010-1319`), frontend test tools (`FEAT-1222`), real end-to-end flows (`FEAT-1225`), the isolation contract test (`FEAT-1226`).
 
+### Result of FEAT-20261010-1209: SeaweedFS checks from outside Docker (2026-10-10)
+
+- **Built (branch `feat-20261010-1209-seaweedfs-checks`):** 15 integration tests (`tests/integration/seaweedfs/`) run from the host with boto3 against the SeaweedFS 4.48 test service (`-s3.externalUrl` set to the public address). They stay as regression tests for the storage adapter. All pass.
+- **Proved by running (until now only read in documentation):**
+  1. A presigned POST with `content-length-range` 1 byte to 1 MiB and the content type pinned: a 100 KB upload is accepted and `HEAD` returns the right size and type.
+  2. An upload of 5 MiB is refused with 400 `EntityTooLarge` and no object is created; an empty upload is refused with `EntityTooSmall`.
+  3. **Measured:** a 64 MiB upload against the 1 MiB range was **received in full** (64 MiB sent, 0.8 to 1.0 s on loopback) and only then refused with 400. So storage does not stop reading early: the size range protects storage but not bandwidth or time. The post-upload size check in the submit step stays as the second line of defence; a request size limit in front of storage belongs to the production work (`WISH-20261010-1309`). This answers the question the notepad left open.
+  4. A link signed for the public address works from outside Docker. A link signed for the Docker-internal name `storage-test:8333` and used through the public address is refused with 403: this is the reason the public storage URL is a required setting.
+  5. `HEAD` gives size and content type; a missing key gives 404. A presigned download link returns the bytes and is refused (403) after it expires. Deleting removes the object; deleting a missing key is not an error.
+  6. Keys round-trip unchanged: slashes, spaces, non-ASCII characters, `+` and `&`.
+  7. A lifecycle expiry rule (30 days, prefix `orgs/`) is accepted and read back. **Not verified:** that SeaweedFS then deletes expired objects (the smallest unit is a day). The `maintenance` cleanup is the primary mechanism and the rule is only a backstop, as designed.
+  8. 20 `HEAD` calls at once through `asyncio.to_thread` with one boto3 client all succeed (D47).
+- **Also learned:** boto3 ships no type information, so mypy ignores missing stubs for `boto3` and `botocore` (the stub package is not on the approved list). `weed server -h` also offers `-s3.allowedOrigins` (CORS for browser uploads); a browser upload needs the right CORS setting, to be tested with the file API (`FEAT-1221`) and the upload page (`FEAT-1314`).
+- **Design documents updated:** `storage-adapter.md` (the size-check row) and `DATABASE.md` (the lifecycle item).
+
 ### Deferred / later (decided to postpone, not Phase 1)
 
 These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.
