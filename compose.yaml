@@ -10,8 +10,8 @@
 # Secrets come from .env (copy .env.example); the variables marked required stop `docker compose`
 # with a clear message when they are missing.
 #
-# The application services (migrate, api, relay, worker, maintenance) are added by the tasks that
-# create their entry points: FEAT-20261010-1204, -1205, -1215, -1216 and -1217.
+# The application services are added by the tasks that create their entry points: migrate
+# (FEAT-20261010-1204, here), api (-1205), relay (-1215), worker (-1216), maintenance (-1217).
 
 name: qfe
 
@@ -27,6 +27,8 @@ services:
     volumes:
       # PostgreSQL 18 images keep data in a versioned folder below /var/lib/postgresql.
       - postgres-data:/var/lib/postgresql
+      # Creates the database roles on the first start of an empty data folder (FEAT-20261010-1204).
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:${QFE_PORT_POSTGRES:-5433}:5432"
     healthcheck:
@@ -88,6 +90,21 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # One-shot: applies the database migrations as qfe_migrator, then exits. Services that need the
+  # tables wait for it with `condition: service_completed_successfully`. The other application
+  # services reuse this image (image: qfe-backend:dev) with a different command.
+  migrate:
+    build:
+      context: ./backend
+    image: qfe-backend:dev
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      QFE_MIGRATOR_DATABASE_URL: postgresql+asyncpg://qfe_migrator:${QFE_MIGRATOR_DB_PASSWORD:?set QFE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/qfe
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   frontend:
     build:
       context: ./frontend
@@ -123,7 +140,11 @@ services:
     extends:
       service: postgres
     profiles: ["test"]
-    volumes: !reset []
+    environment:
+      # An empty, prepared template database; tests clone a fresh database from it.
+      QFE_TEMPLATE_DB: qfe_template
+    volumes: !override
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
     tmpfs:
       - /var/lib/postgresql
     ports: !override
