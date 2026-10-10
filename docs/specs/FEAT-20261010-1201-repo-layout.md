@@ -12,7 +12,7 @@ The empty skeleton every later task fills in: the backend Python project, the fr
 |---|---|
 | Docker, Compose | Docker 29.5.2, Compose 5.1.3 (works) |
 | Node, npm | Node 22.18.0, npm 11.19.1; Next.js 16.4.0 needs Node 20.9 or newer |
-| Python on this machine | `python` is 3.13.0a5 (an alpha) and `py` is 3.11.6. **Neither is 3.12.** uv can install and use its own 3.12 without touching these |
+| Python on this machine | `python` is 3.13.0a5 (an alpha) and `py` is 3.11.6. (Found later: pyenv also has 3.12.2, which uv uses.) |
 | uv | **Not installed** |
 | Repository | git on `master`, no `.gitignore`, no `.gitattributes`, `core.autocrlf` is `false` |
 

@@ -152,18 +152,19 @@ Phase 2 adds: queued / retrying --> cancelled
 ```
 backend/
   src/
-    domain/          Pure business rules. Job, Organisation, ApiKey, state transitions, retry delay calculation.
-    ports/           Interfaces only (see table below).
-    adapters/        One folder per technology: postgres/, rabbitmq/, s3/ (object storage), valkey/, password_auth/
-    application/     Use cases (SubmitJob, CreateApiKey, CreateUploadLink, ...). Depend on ports only.
-    job_types/       Light definitions: name, version, input and output schemas, retry settings. No heavy imports.
-    handlers/        Handler implementations. May import heavy libraries (OCR and so on). Only workers load them.
-    api/             FastAPI routes, request and response models, auth and rate limit middleware.
-    worker/          Consumer loop, concurrency control, lease and heartbeat, retry logic.
-    relay/           Outbox publisher loop.
-    maintenance/     Lease recovery, sweep, cleanups, purge.
-    observability/   Logging, tracing, metrics setup.
-    config/          Settings, validated at startup.
+    qfe/             The one Python package (approved with the spec for FEAT-20261010-1201, D51). Import names are qfe.domain, qfe.ports and so on.
+      domain/          Pure business rules. Job, Organisation, ApiKey, state transitions, retry delay calculation.
+      ports/           Interfaces only (see table below).
+      adapters/        One folder per technology: postgres/, rabbitmq/, s3/ (object storage), valkey/, password_auth/
+      application/     Use cases (SubmitJob, CreateApiKey, CreateUploadLink, ...). Depend on ports only.
+      job_types/       Light definitions: name, version, input and output schemas, retry settings. No heavy imports.
+      handlers/        Handler implementations. May import heavy libraries (OCR and so on). Only workers load them.
+      api/             FastAPI routes, request and response models, auth and rate limit middleware.
+      worker/          Consumer loop, concurrency control, lease and heartbeat, retry logic.
+      relay/           Outbox publisher loop.
+      maintenance/     Lease recovery, sweep, cleanups, purge.
+      observability/   Logging, tracing, metrics setup.
+      config/          Settings, validated at startup.
   tests/
     unit/  integration/  contract/  e2e/
   migrations/        Alembic
