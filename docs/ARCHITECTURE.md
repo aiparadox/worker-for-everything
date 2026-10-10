@@ -300,7 +300,7 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 
 - **Transactional outbox** for submit and for every requeue (section 5, D22): a job can never be saved without being queued, or queued without being saved.
 - **One queue per job type (D28).** Direct exchange; `outbox.routing_key` is the job type. Every process that knows a type (api, relay, worker) idempotently declares that type's durable queue and binding at startup. Messages for a type wait in its queue until a worker for that type starts, so rolling deploys are safe.
-- **Publishing.** The relay publishes with the mandatory flag and publisher confirms. An unroutable message is returned by RabbitMQ before it is confirmed; the relay treats that as a **failed publish**: `published_at` stays null and `publish_attempts` and `last_error` are updated. Without the mandatory flag RabbitMQ would confirm and silently drop such a message. A row that fails repeatedly is logged, counted and alerted on (it is not failed automatically in Phase 1).
+- **Publishing.** The relay publishes with the mandatory flag and publisher confirms. An unroutable message is returned by RabbitMQ before it is confirmed; the relay treats that as a **failed publish**: `published_at` stays null and `publish_attempts` and `last_error` are updated. Without the mandatory flag RabbitMQ would confirm and silently drop such a message. With aio-pika the channel must also be opened with `on_return_raises=True`, otherwise a returned message is handed back to the caller instead of raising an error (verified 2026-10-10). A row that fails repeatedly is logged, counted and alerted on (it is not failed automatically in Phase 1).
 - **Ack after claim (D23).** The worker acks the message as soon as its claim commits, or is refused. It does not wait for the job to finish. This avoids RabbitMQ's acknowledgement timeout for long jobs (30 minutes by default).
 - **Concurrency.** Prefetch no longer limits how many jobs run, because acked messages free their place. A worker consumes only while it has free concurrency and cancels its consumers when it is full. Messages already on their way can still arrive, so a worker may briefly hold **at most one delivered, unclaimed message per queue**. If it cannot start one within a short wait (a tuning value), it nacks it with requeue so another worker can take it. The RabbitMQ consumer timeout stays an explicit setting.
 - **Lease token.** Every heartbeat and final write says `WHERE id = ? AND status = 'running' AND lease_token = ?`. Zero rows updated means the worker lost its lease and must stop. The attempt is recorded as `lease_lost`.
@@ -411,12 +411,20 @@ None of these changes the shape of the design.
 
 **Verify in Phase 0, before pinning anything (CLAUDE.md Modules 3 and 5):**
 
-1. Package versions and Python version (including Python 3.14 against FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js). If 3.14 is not supported, either let Postgres generate every id or pin an older Python with a small library for app-side ids.
-2. The `postgres:18` image tag and `uuidv7()`.
-3. SeaweedFS: presigned PUT and GET, size conditions on upload (presigned POST policy or a size check after upload), and bucket lifecycle rules.
-4. RabbitMQ unroutable-message behaviour with the chosen client library.
-5. Whether a transaction-level advisory lock works with PgBouncer transaction pooling, and whether PgBouncer is needed in the first version at all.
-6. PyJWT and pwdlib (versions, Python support). They are not added until approved.
+**Checked on 2026-10-10 from package metadata and documentation only (nothing installed or run). The details are in the notepad, "Phase 0 verification results".** Outcomes that change the design:
+
+1. Every listed Python package and `python:3.14-slim` support Python 3.14, and 3.14 has `uuid.uuid7()` in the standard library. Next.js 16.4 needs Node 20.9 or newer. `postgres:18` exists. The user still chooses Python 3.14 or 3.12.
+2. **The relay must open its RabbitMQ channel with `on_return_raises=True`** (aio-pika), or an unroutable publish is returned instead of raised (section 11).
+3. **Do not use `aioboto3`:** it pins an old `aiobotocore`, and `aiobotocore` and current `boto3` need conflicting `botocore` versions. Pick one S3 client path (`aiobotocore`, or `boto3` in a thread pool).
+4. SeaweedFS supports presigned URLs, HeadObject, POST policy with an enforced size range, multipart and lifecycle expiry, and needs `-s3.externalUrl` for presigned links to work from outside Docker. Use a presigned **POST policy** for the upload size limit.
+5. The transaction-level advisory lock is documented as released at transaction end; PgBouncer's docs only cover session-level locks, which never work in transaction pooling. PgBouncer is not needed in the first version. `LISTEN/NOTIFY` (a deferred item) cannot go through a transaction-pooled connection.
+6. SQLAlchemy 2.1 needs the `[asyncio]` extra and defaults to psycopg 3, so the `asyncpg` driver must be chosen explicitly. Redis 8 is AGPLv3; Valkey is BSD and wire-compatible.
+
+**Still to do in Phase 0 (needs running code and the user's approval of each dependency, Modules 3 and 5):**
+
+1. Install and test the chosen versions together, including `httpx` on Python 3.14 and Next.js with the TypeScript version its generator picks.
+2. An integration test for the advisory lock under PgBouncer, and the SeaweedFS end-to-end upload checks from outside Docker.
+3. The user's choices: Python 3.14 or 3.12, SQLAlchemy 2.1 or 2.0, Redis or Valkey, and the S3 client path.
 
 **Still to settle:**
 

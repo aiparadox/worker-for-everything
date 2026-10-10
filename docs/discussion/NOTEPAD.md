@@ -21,7 +21,7 @@ Plain English is required for explanations to the user (`CLAUDE.md`, Module 10).
 |---|---|
 | Phase of work | Design. No product code, no scaffolding, no dependencies installed. |
 | Done | Requirements gathered. Design Sections 1, 2 and 3 approved. Rate limiting added. Decisions D1 to D40 recorded. `docs/ARCHITECTURE.md` and `docs/DATABASE.md` rewritten on 2026-10-09 and corrected on 2026-10-10 to match all of them. |
-| Waiting on | The user's review and approval of the rewritten `ARCHITECTURE.md` and `DATABASE.md`. Nothing else is blocking: the remaining open items (section 10) are Phase 0 verifications and tuning defaults. |
+| Waiting on | The user's review and approval of `ARCHITECTURE.md` and `DATABASE.md`, and the user's next ("big") task. The user has said **write no code yet**. Metadata and documentation checks are done (section "Phase 0 verification results"); five choices are waiting for the user: Python 3.14 or 3.12, SQLAlchemy 2.1 or 2.0, Redis or Valkey, the S3 client path, and the integration test setup. |
 | Docs state | Both design docs match D19 to D40 as of 2026-10-10. They are drafts until the user approves them. Not pushed to GitHub from this session (no SSH access); the user pushes. |
 | Next step | After the user approves both docs: present the **task inventory** (Phase 0, Phase 1, Phase 2, deferred list, verification tasks) in plain English. Only after approval, write items to `TODO.md` as `[ ]`. |
 | After that | Per item: verify the code or setup, write a short spec in `docs/specs/`, get approval, then implement on the checked-out branch. |
@@ -93,6 +93,7 @@ Everything happened on 2026-10-08. Each row is one exchange.
 | 17 | User was confused by my word "slot"; I explained it means concurrency. User clarified that concurrency varies per pool (OCR 1, email sending tuned by load testing). | Agreed: dedicated pools through `WORKER_JOB_TYPES`, concurrency per pool, no per-type cap (D35). I then rewrote `ARCHITECTURE.md` and `DATABASE.md` for D19 to D35 and this notepad. | Docs are consistent with the decision pack. |
 | 18 | User pasted a second analysis of the committed docs (four problems and several smaller points). I checked each against the files, confirmed all four, and explained three of them on request: the lock held during storage calls, a used refresh token shown again from a second tab, and what the sweep is. The user also asked whether duplicate sweep messages could run a job twice, and whether the outbox keeps finished jobs. | **Apply all recommendations** (D36 to D40), including `family_expires_at` and `GET /v1/files/{id}`. `WORKER_JOB_TYPES` required with `*` ("ok"). | Four real flaws fixed in my own docs. |
 | 19 | Docs updated for D36 to D40 and committed. | See the Commits row in section 1. | The notepad's state rows are current again. |
+| 20 | User said the design for Phase 1 is done, forbade writing any code, and asked me to verify the remaining items and log requirements before giving me a big task. They confirmed the Claude session cannot reach GitHub because the SSH key has a passphrase. | I verified packages, image tags, npm and upstream documentation (nothing installed or run) and recorded the results in "Phase 0 verification results". Findings that change the design: relay needs `on_return_raises=True`; do not use `aioboto3`; use a presigned POST policy for upload size limits; Redis 8 is AGPLv3 (Valkey is BSD). | The user can now make the five pending choices (Python version, SQLAlchemy version, Redis or Valkey, S3 client, integration test setup). **Not committed yet.** |
 
 ## 5. Decisions in detail
 
@@ -544,6 +545,90 @@ These were raised during review of the decision pack (2026-10-09). The user chos
 
 **Kept in Phase 1 on purpose (so nobody defers them by mistake):** signup creates the user's first organisation; file upload with the `files` table; idempotent submit race handling; logging, metrics and alerts for stuck outbox rows and sweep re-queues; the CSRF minimum; the explicit proxy-header default (documented); the exact active-jobs cap with the advisory lock; the organisation-isolation contract test.
 
+## Phase 0 verification results (2026-10-10)
+
+The user asked for the remaining checks to be done without writing code. Method: package metadata read from PyPI's public JSON, image tags read from Docker Hub's public API, the npm registry, and official or upstream documentation pages. **Nothing was installed or run**, so this proves what packages declare and what documents say, not that they work together at runtime. Real installs and test runs stay in Phase 0, each dependency with the user's approval first (Module 5). Versions are what was current on 2026-10-10 and are not pinned.
+
+### Packages (Python)
+
+Every package below declares support for Python 3.12, 3.13 and 3.14 (classifiers), and the compiled ones publish `cp314` wheels.
+
+| Package | Latest | Needs Python | Note |
+|---|---|---|---|
+| fastapi | 0.143.0 | >=3.10 | needs starlette>=0.46, pydantic>=2.9 |
+| starlette / uvicorn | 1.7.0 / 0.54.0 | >=3.10 | |
+| pydantic / pydantic-core / pydantic-settings | 2.14.0 / 2.50.0 / 2.15.0 | >=3.10 | |
+| sqlalchemy | 2.1.4 | **>=3.11** | new minor line, see requirements below |
+| asyncpg | 0.32.0 | >=3.9 | `cp314` wheels exist |
+| alembic | 1.20.0 | >=3.10 | needs SQLAlchemy>=2.0; changelog says 1.19.2 added SQLAlchemy 2.1 support |
+| aio-pika / aiormq | 10.1.0 / 7.2.1 | >=3.11 | aio-pika needs aiormq>=7.1.3,<8 |
+| redis (client) | 8.1.0 | >=3.10 | works with Redis and Valkey |
+| pyjwt | 2.15.1 | >=3.9 | |
+| pwdlib (+ argon2 extra) | 0.3.1 | >=3.10 | still a 0.x release; extra pulls argon2-cffi 25.1.0 (last released June 2025) and argon2-cffi-bindings 26.1.0 (`cp314` wheels) |
+| boto3 / aiobotocore / aioboto3 | 1.43.111 / 3.9.2 / 15.5.0 | >=3.9 to 3.10 | **version conflict, see requirements below** |
+| opentelemetry-api / sdk / exporter-otlp | 1.45.1 | >=3.10 | |
+| opentelemetry-instrumentation-fastapi / sqlalchemy / asyncpg | 0.66b1 | >=3.10 | **beta**, pinned exactly to the matching SDK line |
+| structlog, prometheus-client | 26.1.0, 0.26.0 | >=3.9 to 3.10 | |
+| pytest / pytest-asyncio / testcontainers | 9.1.1 / 1.4.0 / 4.15.0 | >=3.10 | testcontainers is a viable choice for Q10 |
+| httpx | 0.28.1 | >=3.8 | **last release Dec 2024; classifier lists only 3.12.** Pure Python, so probably fine on 3.14, but run its tests in Phase 0 (FastAPI's test client uses it) |
+| psycopg / uuid-utils / orjson | 3.3.6 / 1.0.0 / 3.13.0 | >=3.10 | optional |
+
+### Frontend and runtime
+
+- `next` 16.4.0 needs Node **>=20.9.0**; peers: React ^18.2 or ^19. React 19.3.0. Local Node 22.18.0 is fine. Docker images `node:22-slim`, `node:24-slim` exist.
+- `typescript` latest is 7.0.2 and `eslint` 10.12.0. I did not check whether Next 16.4 supports TypeScript 7. The scaffold must come from the framework generator (`create-next-app`, Module 8), which chooses compatible versions.
+
+### Docker images (all exist)
+
+`postgres:18` and `postgres:18-alpine`; `python:3.14-slim`, `3.13-slim`, `3.12-slim`; `rabbitmq:4-management` (and `3-management`); `redis:8` and `redis:7`; `valkey/valkey:8`; `chrislusf/seaweedfs:latest`; `node:22-slim`, `node:24-slim`; `grafana/grafana`, `grafana/loki`, `grafana/tempo` (last updated 2026-06-02), `prom/prometheus`, `otel/opentelemetry-collector-contrib`; `grafana/otel-lgtm` (an all-in-one Grafana, Loki, Tempo and Prometheus image, updated 2026-10-09, an option for local development); `edoburu/pgbouncer`. No tag is pinned yet.
+
+### Official documentation findings
+
+| Topic | Finding | Source |
+|---|---|---|
+| `uuidv7()` in Postgres 18 | Exists, signature `uuidv7([shift interval])`, millisecond plus sub-millisecond timestamp plus random. The page does **not** promise ordering within a session or within a millisecond. `uuid_extract_timestamp` and `gen_random_uuid`/`uuidv4` also exist. | https://www.postgresql.org/docs/18/functions-uuid.html |
+| `uuid.uuid7()` in Python 3.14 | Exists, added in 3.14; uses a 42-bit counter to keep order within a millisecond. | https://docs.python.org/3.14/library/uuid.html |
+| Advisory locks | `pg_advisory_xact_lock(key bigint)` or `(key1 int, key2 int)`; held until the transaction ends, with no manual release. | https://www.postgresql.org/docs/18/functions-admin.html |
+| PgBouncer feature map | Session-level advisory locks: **never** in transaction pooling. `LISTEN` and `SET/RESET`: never in transaction pooling. `NOTIFY` works. Prepared statements work in transaction pooling when `max_prepared_statements` is non-zero (supported since PgBouncer 1.21; default 200). The page does not mention transaction-level advisory locks. | https://www.pgbouncer.org/features.html |
+| SeaweedFS S3 | Presigned URLs (SigV4), HeadObject, PostObject (POST policy), multipart upload, bucket lifecycle get and put (transition rules not supported) are supported. Replication, website hosting, bucket notifications are not. | https://github.com/seaweedfs/seaweedfs/wiki/Amazon-S3-API |
+| SeaweedFS POST policy size limit | The upstream source (`weed/s3api/s3api_object_handlers_postpolicy.go`, master) reads `ContentLengthRange` and returns `EntityTooSmall` or `EntityTooLarge` when the file size is outside it. So a size limit **is enforced**. I did not check whether it is checked before or after the body is read. | https://raw.githubusercontent.com/seaweedfs/seaweedfs/master/weed/s3api/s3api_object_handlers_postpolicy.go |
+| SeaweedFS public address | Presigned URLs are signed for a host name and fail when accessed through a different one. Set `weed s3 -s3.externalUrl=https://...` (or pass `X-Forwarded-Host/Proto/Port`). This matches the required "public storage URL" setting in D31. | https://github.com/seaweedfs/seaweedfs/wiki/S3-Configuration |
+| aio-pika publish | `Exchange.publish(message, routing_key, *, mandatory=True, immediate=False, timeout=None)`. With confirms on it returns `aiormq.spec.Basic.Ack`. A Nack or Reject raises `DeliveryError`. For an unroutable mandatory message it raises `PublishError` **only if the channel was opened with `on_return_raises=True`**; otherwise it returns the `DeliveredMessage` and calls the channel's return callbacks. The docstring warns a lost confirmation does not mean the broker rejected the message, so retrying can produce duplicates. | https://raw.githubusercontent.com/mosquito/aio-pika/master/aio_pika/exchange.py |
+| SQLAlchemy 2.1 | Minimum Python 3.11. `greenlet` is no longer installed by default (use the `[asyncio]` extra). Default PostgreSQL driver is now psycopg 3 (asyncpg still supported). Autoflush now applies to all statements. | https://docs.sqlalchemy.org/en/21/changelog/migration_21.html |
+| Alembic | 1.20.0 needs SQLAlchemy>=2.0. 1.19.2 added support for 2.1 accessors; 1.19.0 added Python 3.14 and 3.15 classifiers. | https://alembic.sqlalchemy.org/en/latest/changelog.html |
+| Redis licence | Redis 8 ships under **AGPLv3**; Valkey is BSD-3-Clause and wire-compatible, and redis-py works with both. | https://linuxiac.com/welcome-back-to-the-open-source-family-redis/ and https://blog.elest.io/valkey-vs-redis-vs-keydb-which-in-memory-store-after-the-license-change/ |
+
+### Requirements this check produced
+
+1. **Relay must open its RabbitMQ channel with `on_return_raises=True`** (or handle the returned message explicitly). Without it, aio-pika returns the message and does not raise, so an unroutable publish could be mistaken for success. This is the exact failure D28 was written to prevent. The relay must also treat a lost confirmation as "may have been published", which is covered by the at-least-once rule.
+2. **Do not use `aioboto3`.** Its latest release pins `aiobotocore[boto3]==2.25.1`, while the current `aiobotocore` is 3.9.2. Also, `aiobotocore` 3.9.2 needs `botocore<1.43.107` while current `boto3` needs `botocore>=1.43.111`, so they cannot be installed together unless pinned through aiobotocore's own `boto3` extra. **Pick one S3 client path** in Phase 0: either `aiobotocore` (async HEAD checks and presigning) or plain `boto3` run in a thread pool. Presigning is local signing with no network call.
+3. **SQLAlchemy asyncio needs the `[asyncio]` extra** (greenlet) in 2.1. Use the `asyncpg` driver explicitly, since the 2.1 default is psycopg 3.
+4. **Transaction-level advisory lock with PgBouncer:** safe in principle (the lock is released at transaction end and, in transaction pooling, the connection is held for the whole transaction), but PgBouncer's page does not state it. Prove it with an integration test in Phase 0. Session-level locks must never be used. Lock key: derive a 64-bit value from the organisation id (the function takes a `bigint`); a hash collision between two organisations only causes harmless extra waiting.
+5. **PgBouncer is not needed in the first version.** If it is added later, set `max_prepared_statements` to a non-zero value (PgBouncer >= 1.21) so asyncpg works in transaction pooling. **A future `LISTEN/NOTIFY` wake-up for the relay (deferred item) cannot go through a transaction-pooled connection**: it needs a direct connection or session pooling.
+6. **Public storage URL:** the SeaweedFS S3 gateway must be started with `-s3.externalUrl` (or correct forwarded headers) so presigned links work from outside Docker. This confirms the required config setting from D31.
+7. **Upload size limits:** use a presigned **POST policy** with `content-length-range` (SeaweedFS enforces it). A plain presigned PUT does not carry a size limit. Keep the post-upload size check as a second line.
+8. **Ordering is not guaranteed:** `uuidv7()` in Postgres 18 documents no ordering guarantee within a millisecond. The design already says nothing may depend on strict order; this keeps that rule.
+9. **OpenTelemetry instrumentation packages are beta (`0.66b1`)** and tied to the SDK line `1.45.x`. Pin them together, and expect them to move.
+10. **Next.js:** generate the project with `create-next-app` (Module 8) and let it choose the TypeScript and ESLint versions.
+
+### Choices this check puts in front of the user (nothing decided)
+
+- **Python 3.14 or 3.12.** Every package supports 3.14, the `python:3.14-slim` image exists, and 3.14 has `uuid.uuid7()` in the standard library. Recommendation: 3.14. Python 3.12 would work too, with Postgres generating ids (or a small library for app-side ids).
+- **SQLAlchemy 2.1 or 2.0.** 2.1 is a new minor line (Python 3.11 minimum, behaviour changes above); Alembic 1.19.2 and later cover it. Staying on 2.0 is the cautious option. Recommendation: decide in the Phase 0 spec after a trial run.
+- **Redis or Valkey** for the rate limiter. Both images exist; `redis:8` is AGPLv3, `valkey/valkey:8` is BSD. We use it only as an internal service, so either is workable. Pick by the user's licence policy. The `RateLimiter` adapter is unaffected.
+- **S3 client:** `aiobotocore` or `boto3` in a thread pool (requirement 2).
+- **Integration tests (Q10):** `testcontainers` 4.15.0 declares Python 3.14 support, so throwaway containers from test code is viable; a shared Compose test profile also works. Not decided.
+
+### Not verified (still open for Phase 0)
+
+- Any runtime behaviour: nothing was installed, built or executed.
+- The advisory lock under PgBouncer in practice (requirement 4), httpx on Python 3.14, and `pwdlib` and `PyJWT` behaviour beyond their metadata.
+- Whether Next.js 16.4 works with TypeScript 7.
+- SeaweedFS presigned PUT and GET end to end from outside Docker, lifecycle expiry behaviour, and whether the POST size check happens before or after the body is read.
+- aio-pika's consumer cancel and resume calls and prefetch settings (the API page was not reachable through the fetch tool; only the publish source was read), and RabbitMQ's built-in Prometheus metrics for the "queue has messages but no consumers" alert.
+- Compatibility of Grafana, Loki, Tempo, Prometheus and the collector with each other; `grafana/tempo` was last updated 2026-06-02.
+- The `consumer_timeout` setting itself (the default of 30 minutes was confirmed earlier in a search, but the broker setting was not read from RabbitMQ's own docs).
+
 ## 6. Wiring map (how the pieces connect)
 
 ### 6.1 Runtime flow of one job
@@ -633,19 +718,19 @@ Each has context so it can be settled without re-discovery.
 | # | Open item | Why it is open | My leaning |
 |---|---|---|---|
 | Q10 | Integration tests: throwaway containers started from test code, or a shared Compose test profile | Depends on which library fits the pinned versions. Not checked yet. | Decide when versions are pinned. |
-| V1 | Do FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js support the chosen Python and Node versions? | Never checked. Search only gave general support statements. | Check each on PyPI and with context7 (CLAUDE.md Module 3) before any pin. |
-| V2 | Does the `postgres:18` Docker image tag exist and work for our needs? | Not checked. | Check on Docker Hub before the Compose file. |
-| V3 | Python 3.14 or let Postgres generate every id | Depends on V1. | Pin 3.14 only if the whole stack supports it; otherwise Postgres-generated ids. |
+| V1 | Do FastAPI, SQLAlchemy, asyncpg, Alembic, the RabbitMQ client, OpenTelemetry packages and Next.js support the chosen Python and Node versions? | **VERIFIED 2026-10-10 (metadata only).** Every listed package declares support for Python 3.12 to 3.14; Next.js 16.4 needs Node >=20.9. Details in "Phase 0 verification results". | Real installs and test runs still happen in Phase 0, each dependency approved first (Module 5). |
+| V2 | Does the `postgres:18` Docker image tag exist and work for our needs? | **VERIFIED:** `postgres:18` and `postgres:18-alpine` exist on Docker Hub; `uuidv7()` is in the Postgres 18 docs. | Pin an exact tag in Phase 0. |
+| V3 | Python 3.14 or let Postgres generate every id | **Answerable now:** the whole stack declares 3.14 support, `python:3.14-slim` exists, and 3.14 has `uuid.uuid7()`. | Recommend Python 3.14. The user decides. |
 | R1 | Default values for the rate limits and every other tuning setting (lease length, heartbeat interval, worker concurrency, wait before handing back an unstarted message, sweep wait and cap, sweep batch size, retry delays, active-jobs cap, presigned URL lifetime, file size cap, pending-file expiry, retention, payload and result caps, token lifetimes, refresh reuse window, absolute login lifetime) | User has not given numbers. Needs expected traffic. Tuning values may have code defaults (Module 4). | Settle in Phase 0 or the first spec. Pick conservative defaults, configurable by env, and document them. |
 | H1 | Which real sample handler ships in Phase 1 (besides `echo`) | Not discussed. | Something small and dependency-light that exercises files and progress, to prove the contract. Ask the user. |
 | ~~DB1~~ | **CLOSED.** Assumptions A1 to A9 settled in D29 and D34. | | |
 | ~~Q14~~ | **ANSWERED, approved as D22.** | | |
 | ~~Q15~~ | **CLOSED, deferred.** Email verification and the email sender are out of Phase 1 (D30). | | |
 | ~~Q16~~ | **ANSWERED, D31.** File upload is in Phase 1. | | |
-| V4 | Verify before pinning: SeaweedFS presigned PUT and GET, size conditions on upload, lifecycle rules (D20, D31) | Not checked. | Phase 0. |
-| V5 | Verify: RabbitMQ unroutable-message behaviour with the chosen client library (the broker behaviour itself is confirmed, section 7) | Library not chosen. | Phase 0. |
-| V6 | Verify: a transaction-level advisory lock with PgBouncer transaction pooling, and whether PgBouncer is needed at all (D29) | Not checked. | Phase 0. |
-| V7 | Verify: PyJWT and pwdlib versions and Python support (D33). Not added until approved (Module 5). | Not checked. | Phase 0. |
+| V4 | Verify before pinning: SeaweedFS presigned PUT and GET, size conditions on upload, lifecycle rules (D20, D31) | **VERIFIED from docs and source (not run):** presigned URLs, HeadObject, POST policy with an enforced size range, multipart and lifecycle are supported; needs `-s3.externalUrl`. | End-to-end test in Phase 0. |
+| V5 | Verify: RabbitMQ unroutable-message behaviour with the chosen client library (the broker behaviour itself is confirmed, section 7) | **VERIFIED for aio-pika:** the relay must open its channel with `on_return_raises=True`, otherwise an unroutable publish is returned, not raised. | Cover it in the `QueueAdapter` contract test. |
+| V6 | Verify: a transaction-level advisory lock with PgBouncer transaction pooling, and whether PgBouncer is needed at all (D29) | **PARTLY VERIFIED:** transaction-level locks are released at transaction end (Postgres docs); PgBouncer docs cover only session-level locks (never work in transaction pooling) and do not mention transaction-level ones. PgBouncer is not needed in the first version. | Integration test in Phase 0. |
+| V7 | Verify: PyJWT and pwdlib versions and Python support (D33). Not added until approved (Module 5). | **VERIFIED (metadata):** PyJWT 2.15.1 and pwdlib 0.3.1 (a 0.x release) declare Python 3.14 support; the argon2 extra uses argon2-cffi 25.1.0 with `cp314` wheels in its bindings. | Behaviour test in Phase 0. |
 | O1 | Does the access token need organisation switching when a user belongs to several organisations? | Phase 1 signup creates one organisation, so not needed yet. | Decide when invitations arrive. |
 | DB2 | Audit log and billing or usage metering | Deferred (listed in "Deferred / later"). An audit log is hard to add later without gaps. | Decide early even if built later. |
 | T1 | Task inventory for `TODO.md` | The user has not yet approved the rewritten `ARCHITECTURE.md` and `DATABASE.md`. | Present the inventory after the user approves both docs. |

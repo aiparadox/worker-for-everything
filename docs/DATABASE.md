@@ -460,8 +460,12 @@ The full list, with the consequence of each, is in the "Deferred / later" sectio
 
 ## 15. Still to verify before building (Phase 0)
 
-- PostgreSQL 18 behaviour that this plan relies on, checked against the official docs: `uuidv7()`, partial indexes, `SKIP LOCKED`, HOT updates, and the `postgres:18` image tag.
-- SQLAlchemy 2 async, asyncpg and Alembic versions that work together with the chosen Python.
-- Whether a transaction-level advisory lock is safe with PgBouncer transaction pooling, and whether PgBouncer is needed in the first version at all.
-- SeaweedFS: presigned PUT and GET, size checks on upload, lifecycle rules.
+**Checked on 2026-10-10 (documentation and package metadata only, nothing run):** `uuidv7()` exists in the PostgreSQL 18 docs (signature `uuidv7([shift interval])`, no promised ordering within a millisecond); the `postgres:18` image exists; transaction-level advisory locks take a `bigint` (or two `int4`) key and are released at transaction end; SQLAlchemy 2.1 needs Python 3.11 or newer, the `[asyncio]` extra, and an explicit `asyncpg` driver choice; Alembic 1.19.2 and later cover SQLAlchemy 2.1; SeaweedFS supports lifecycle rules (not transition rules). Details are in the notepad.
+
+**Still to verify, with running code:**
+
+- Partial indexes, `SKIP LOCKED` and HOT-update behaviour on the `jobs` table under load (docs are known, behaviour is not measured).
+- The advisory lock under PgBouncer transaction pooling, with an integration test. PgBouncer is not needed in the first version; if added, set `max_prepared_statements` to a non-zero value.
+- The Alembic and SQLAlchemy versions together, on the chosen Python.
+- SeaweedFS lifecycle expiry behaviour.
 - Partitioning by id range (the idea in section 11).
