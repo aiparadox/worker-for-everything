@@ -62,6 +62,19 @@ plugins = ["pydantic.mypy"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "--strict-markers --strict-config"
+markers = [
+    "unit: no Docker; fakes only (set from the folder)",
+    "integration: needs the Compose test services (set from the folder)",
+    "contract: one suite per port, run against every adapter (set from the folder)",
+    "e2e: needs the whole development stack (set from the folder)",
+]
+
+[tool.coverage.run]
+source = ["qfe"]
+
+[tool.coverage.report]
+show_missing = true
+# No minimum percentage yet: a threshold set before there is code is arbitrary.
 
 [dependency-groups]
 dev = [
