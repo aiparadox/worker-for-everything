@@ -710,6 +710,13 @@ The virtual implementation (`docs/virtual-implementation/`) ended with 10 open q
 - **Also learned:** boto3 ships no type information, so mypy ignores missing stubs for `boto3` and `botocore` (the stub package is not on the approved list). `weed server -h` also offers `-s3.allowedOrigins` (CORS for browser uploads); a browser upload needs the right CORS setting, to be tested with the file API (`FEAT-1221`) and the upload page (`FEAT-1314`).
 - **Design documents updated:** `storage-adapter.md` (the size-check row) and `DATABASE.md` (the lifecycle item).
 
+### D52. httpx2 replaces httpx (2026-10-10)
+
+- **Decided by:** the user ("switch to httpx2"), answering `ISS-20261010-1320`. This replaces `httpx` on the approved dependency list (D51, `FEAT-1208`).
+- **Why:** Starlette 1.7 builds its test client on `httpx2` and warns that using `httpx` there is deprecated; `httpx` 0.28.1 was last released in December 2024. `httpx2` 2.13.1 is from the pydantic organisation (github.com/pydantic/httpx2), Python 3.10 or newer; it brings `httpcore2` 2.13.1 and `truststore`.
+- **Done (branch `iss-20261010-1320-httpx2`):** `uv remove httpx`, `uv add httpx2`; the four test files that use an HTTP client now `import httpx2` (same API: `AsyncClient`, `ASGITransport`, `post` with `files`). All 235 tests pass with `-W error::DeprecationWarning`, so the Starlette warning is gone; ruff and mypy are clean. Nothing in `src/` used the client. Outgoing HTTP from the application (webhooks in Phase 2) will use `httpx2` too.
+- **Not checked:** `httpx2` has a short history (versions 2.5 to 2.13 seen on PyPI); its stability is judged only by these tests.
+
 ### Deferred / later (decided to postpone, not Phase 1)
 
 These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.

@@ -29,7 +29,7 @@ Every package below declares support for Python 3.12. Versions are the latest at
 | pyjwt | 2.15.1 | accounts (`FEAT-1218`) | JWT signing (D33) |
 | pwdlib (with the `argon2` extra) | 0.3.1 | accounts | Argon2 password hashing (D33). Still a 0.x release |
 | boto3 | 1.43.111 | storage adapter (`FEAT-1214`) | S3 API in a thread pool (D47) |
-| httpx | 0.28.1 | tests, FastAPI test client | last released Dec 2024; its Python 3.12 use is tested in this task |
+| ~~httpx~~ **httpx2** | ~~0.28.1~~ 2.13.1 | tests, FastAPI test client | replaced by httpx2 on 2026-10-10 (D52, `ISS-20261010-1320`) |
 | structlog | 26.1.0 | observability (`FEAT-1205`) | JSON logs with trace id |
 | prometheus-client | 0.26.0 | observability | `/metrics` |
 | opentelemetry-api, -sdk, -exporter-otlp | 1.45.1 | observability | traces |
