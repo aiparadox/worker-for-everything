@@ -1,8 +1,8 @@
 # Specs
 
-One short spec per `TODO.md` item (CLAUDE.md Module 7): what is built, the facts checked, the proposal, tests, and the branch. A spec is a draft until the user approves it; no code is written before that.
+One short spec per `TODO.md` item (CLAUDE.md Module 7): what is built, the facts checked, the proposal, tests, and the branch. A spec is a draft until the user approves it; no code is written before that. The Phase 0 specs below were approved on 2026-10-10.
 
-## Phase 0 specs (written 2026-10-10, draft for approval)
+## Phase 0 specs (written and approved 2026-10-10)
 
 Order of work. Each task gets its own branch from `master` and is merged back to `master` before the next one starts (the process agreed on 2026-10-10).
 

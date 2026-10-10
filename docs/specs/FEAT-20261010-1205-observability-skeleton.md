@@ -1,6 +1,6 @@
 # FEAT-20261010-1205: observability skeleton and the first running API
 
-Status: **draft for approval**. Working branch: `feat-20261010-1205-observability-skeleton`, from `master` after `FEAT-1204`. Depends on: `FEAT-20261010-1202`, `FEAT-20261010-1203`, `FEAT-20261010-1204`, `FEAT-20261010-1208`.
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1205-observability-skeleton`, from `master` after `FEAT-1204`. Depends on: `FEAT-20261010-1202`, `FEAT-20261010-1203`, `FEAT-20261010-1204`, `FEAT-20261010-1208`.
 
 ## 1. What this builds and why
 

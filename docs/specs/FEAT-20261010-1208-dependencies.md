@@ -1,6 +1,6 @@
 # FEAT-20261010-1208: install and check the dependencies together
 
-Status: **draft for approval**. Working branch: `feat-20261010-1208-dependencies`, from `master` after `FEAT-1201` is merged. Depends on: `FEAT-20261010-1201`, D45, D46, D47.
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1208-dependencies`, from `master` after `FEAT-1201` is merged. Depends on: `FEAT-20261010-1201`, D45, D46, D47.
 
 ## 1. What this builds and why
 

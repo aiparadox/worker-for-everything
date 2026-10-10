@@ -1,6 +1,6 @@
 # FEAT-20261010-1201: repository layout
 
-Status: **draft for approval**. Working branch: `feat-20261010-1201-repo-layout`, from `master`. Depends on: nothing (the tooling is decided in D45).
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1201-repo-layout`, from `master`. Depends on: nothing (the tooling is decided in D45).
 
 ## 1. What this builds and why
 

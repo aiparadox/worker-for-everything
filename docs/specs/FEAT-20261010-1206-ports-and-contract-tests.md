@@ -1,6 +1,6 @@
 # FEAT-20261010-1206: port interfaces and contract test suites
 
-Status: **draft for approval**. Working branch: `feat-20261010-1206-ports`, from `master` after `FEAT-1205`. Depends on: `FEAT-20261010-1208` (packages; no running service is needed).
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1206-ports`, from `master` after `FEAT-1205`. Depends on: `FEAT-20261010-1208` (packages; no running service is needed).
 
 ## 1. What this builds and why
 

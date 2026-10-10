@@ -1,6 +1,6 @@
 # FEAT-20261010-1204: Alembic and the first database schema
 
-Status: **draft for approval**. Working branch: `feat-20261010-1204-alembic-schema`, from `master` after `FEAT-1202`. Depends on: `FEAT-20261010-1202` (Postgres service), `FEAT-20261010-1203` (config), `FEAT-20261010-1208` (packages). Settles D46 by trial.
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1204-alembic-schema`, from `master` after `FEAT-1202`. Depends on: `FEAT-20261010-1202` (Postgres service), `FEAT-20261010-1203` (config), `FEAT-20261010-1208` (packages). Settles D46 by trial.
 
 ## 1. What this builds and why
 

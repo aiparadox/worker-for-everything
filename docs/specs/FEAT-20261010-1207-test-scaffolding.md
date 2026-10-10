@@ -1,6 +1,6 @@
 # FEAT-20261010-1207: test scaffolding and the API docs check
 
-Status: **draft for approval**. Working branch: `feat-20261010-1207-test-scaffolding`, from `master` after `FEAT-1206`. Depends on: `FEAT-20261010-1202`, `FEAT-20261010-1204`, `FEAT-20261010-1205`, `FEAT-20261010-1206`.
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1207-test-scaffolding`, from `master` after `FEAT-1206`. Depends on: `FEAT-20261010-1202`, `FEAT-20261010-1204`, `FEAT-20261010-1205`, `FEAT-20261010-1206`.
 
 ## 1. What this builds and why
 

@@ -1,6 +1,6 @@
 # FEAT-20261010-1209: SeaweedFS end-to-end checks from outside Docker
 
-Status: **draft for approval**. Working branch: `feat-20261010-1209-seaweedfs-checks`, from `master` after `FEAT-1207`. Depends on: `FEAT-20261010-1202` (the `storage` service), `FEAT-20261010-1207` (test harness), `FEAT-20261010-1208` (boto3).
+Status: **approved by the user on 2026-10-10** (all questions in the last section answered yes; recommendations accepted as written). Working branch: `feat-20261010-1209-seaweedfs-checks`, from `master` after `FEAT-1207`. Depends on: `FEAT-20261010-1202` (the `storage` service), `FEAT-20261010-1207` (test harness), `FEAT-20261010-1208` (boto3).
 
 ## 1. What this builds and why
 
