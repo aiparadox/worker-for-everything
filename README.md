@@ -26,7 +26,7 @@ uv sync                              # create .venv and install the locked packa
 uv run pytest tests/unit tests/contract
 uv run ruff check
 uv run ruff format --check
-uv run mypy
+uv run mypy                           # source and tests
 ```
 
 Frontend (`frontend/`):
