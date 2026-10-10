@@ -1,0 +1,84 @@
+# Continuous checks (docs/specs/FEAT-20261010-1319-github-actions.md).
+# The same commands as the README "Commands" section. The values in the .example files are fake
+# development values with no meaning outside the runner (D43), so they are used as they are.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-checks:
+    name: Backend checks (lint, types, fast tests, API docs check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy
+      - run: uv run pytest tests/unit tests/contract
+
+  backend-stack-tests:
+    name: Backend tests against the Docker services
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Create the local settings files from the examples
+        run: |
+          cp .env.example .env
+          cp .env.test.example .env.test
+      - name: Start the test services
+        run: docker compose --profile test up -d --wait postgres-test rabbitmq-test valkey-test storage-test
+      - name: Start the api (and the database migration it waits for)
+        run: docker compose up -d --build --wait api
+      - run: uv sync --frozen
+        working-directory: backend
+      - name: Integration and end-to-end tests
+        run: uv run pytest tests/integration tests/e2e
+        working-directory: backend
+      - name: Show the container logs when something failed
+        if: failure()
+        run: docker compose --profile test logs --no-color --tail=200
+      - name: Stop everything
+        if: always()
+        run: docker compose --profile test down -v
+
+  frontend:
+    name: Frontend (lint, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
