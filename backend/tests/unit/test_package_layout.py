@@ -22,6 +22,7 @@ SUBPACKAGES = [
     "adapters.s3",
     "adapters.valkey",
     "adapters.password_auth",
+    "adapters.system",
 ]
 
 
