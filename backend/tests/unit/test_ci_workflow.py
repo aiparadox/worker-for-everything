@@ -25,6 +25,10 @@ def test_it_runs_on_pushes_to_master_and_on_pull_requests() -> None:
     assert re.search(r"^  pull_request:", TEXT, re.M)
 
 
+def test_it_can_be_started_by_hand() -> None:
+    assert re.search(r"^  workflow_dispatch:", TEXT, re.M)
+
+
 def test_it_only_needs_read_access() -> None:
     assert re.search(r"^permissions:\s*\n\s+contents: read\s*$", TEXT, re.M)
 
