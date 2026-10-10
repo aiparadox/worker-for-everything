@@ -29,7 +29,7 @@ Three jobs run in parallel:
 
 The fake values in the `.example` files are used as they are: they are development values with no meaning outside the runner (D43).
 
-**Security choices:** actions are pinned by **major version tag** (for example `actions/checkout@v7`), the usual compromise. Pinning to a full commit hash is stricter and protects against a moved tag; it is not done now because nothing in this project is deployed yet (D43), and it can be added with a dependency-update bot later. No secrets are used, so no secret can leak.
+**Security choices:** actions are pinned by version tag: the major tag where the action publishes one (`actions/checkout@v7`, `actions/setup-node@v7`) and the exact tag where it does not (`astral-sh/setup-uv@v10.3.0`; that action publishes no major tags after `v7`, found when the first run failed). The usual compromise. Pinning to a full commit hash is stricter and protects against a moved tag; it is not done now because nothing in this project is deployed yet (D43), and it can be added with a dependency-update bot later. No secrets are used, so no secret can leak.
 
 ## 4. Tests and checks
 
