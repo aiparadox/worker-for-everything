@@ -22,12 +22,17 @@ Run from the folder shown. There is no task runner (decision D45); CI will call 
 Backend (`backend/`):
 
 ```
-uv sync                              # create .venv and install the locked packages
-uv run pytest tests/unit tests/contract
-uv run ruff check
-uv run ruff format --check
-uv run mypy                           # source and tests
+uv sync                                    # create .venv and install the locked packages
+uv run ruff check                          # lint
+uv run ruff format --check                 # formatting
+uv run mypy                                # types, strict, source and tests
+uv run pytest tests/unit tests/contract    # fast: no Docker (includes the API docs check)
+uv run pytest tests/integration            # needs the test services (below)
+uv run pytest tests/e2e                    # needs the whole stack: docker compose up -d --wait
+uv run pytest --cov=qfe                    # everything, with a coverage report
 ```
+
+Integration and end-to-end tests never skip quietly: when a service is not running they fail and print the command that starts it. They read `.env` and `.env.test` (copy the `.example` files).
 
 Frontend (`frontend/`):
 
