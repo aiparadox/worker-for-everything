@@ -33,7 +33,11 @@ def read_values(*, include_commented: bool) -> dict[str, str]:
         match = re.match(pattern, line)
         if match:
             values[match.group(1)] = match.group(2)
-    return values
+    # Compose reads the file top to bottom and fills in ${NAME} from names defined above it.
+    resolved: dict[str, str] = {}
+    for name, value in values.items():
+        resolved[name] = re.sub(r"\$\{(\w+)\}", lambda m: resolved[m.group(1)], value)
+    return resolved
 
 
 @pytest.fixture

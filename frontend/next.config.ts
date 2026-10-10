@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Self-contained server output used by frontend/Dockerfile (FEAT-20261010-1202).
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
 };

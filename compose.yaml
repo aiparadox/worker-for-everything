@@ -1,0 +1,167 @@
+# Docker Compose stack for development (D43: no ingress, TLS or backups).
+# Spec: docs/specs/FEAT-20261010-1202-compose.md
+#
+#   docker compose up -d --wait                       the stack
+#   docker compose --profile observability up -d      adds Grafana, traces, logs and metrics
+#   docker compose --profile test up -d --wait postgres-test rabbitmq-test valkey-test storage-test
+#                                                     separate, empty services for the tests (D48)
+#
+# Every published port binds to 127.0.0.1 so nothing is reachable from the network.
+# Secrets come from .env (copy .env.example); the variables marked required stop `docker compose`
+# with a clear message when they are missing.
+#
+# The application services (migrate, api, relay, worker, maintenance) are added by the tasks that
+# create their entry points: FEAT-20261010-1204, -1205, -1215, -1216 and -1217.
+
+name: qfe
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: qfe
+      POSTGRES_PASSWORD: ${QFE_POSTGRES_SUPERUSER_PASSWORD:?set QFE_POSTGRES_SUPERUSER_PASSWORD in .env}
+      # Used by the role creation script added in FEAT-20261010-1204.
+      QFE_APP_DB_PASSWORD: ${QFE_APP_DB_PASSWORD:?set QFE_APP_DB_PASSWORD in .env}
+      QFE_MIGRATOR_DB_PASSWORD: ${QFE_MIGRATOR_DB_PASSWORD:?set QFE_MIGRATOR_DB_PASSWORD in .env}
+    volumes:
+      # PostgreSQL 18 images keep data in a versioned folder below /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${QFE_PORT_POSTGRES:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d qfe"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${QFE_RABBITMQ_USER:?set QFE_RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${QFE_RABBITMQ_PASSWORD:?set QFE_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-qfe.conf:ro
+    ports:
+      - "127.0.0.1:${QFE_PORT_RABBITMQ:-5672}:5672"
+      - "127.0.0.1:${QFE_PORT_RABBITMQ_MANAGEMENT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8
+    # Rate limit counters only; nothing here needs to survive a restart.
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${QFE_PORT_VALKEY:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  storage:
+    image: chrislusf/seaweedfs:4.48
+    entrypoint: ["/bin/sh", "/qfe/entrypoint.sh"]
+    environment:
+      QFE_STORAGE_ACCESS_KEY: ${QFE_STORAGE_ACCESS_KEY:?set QFE_STORAGE_ACCESS_KEY in .env}
+      QFE_STORAGE_SECRET_KEY: ${QFE_STORAGE_SECRET_KEY:?set QFE_STORAGE_SECRET_KEY in .env}
+      QFE_STORAGE_PUBLIC_URL: ${QFE_STORAGE_PUBLIC_URL:?set QFE_STORAGE_PUBLIC_URL in .env}
+    volumes:
+      - storage-data:/data
+      - ./deploy/seaweedfs/entrypoint.sh:/qfe/entrypoint.sh:ro
+    ports:
+      - "127.0.0.1:${QFE_PORT_STORAGE:-8333}:8333"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && nc -z 127.0.0.1 8333"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${QFE_PORT_FRONTEND:-3100}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  # --- Observability (profile "observability") -------------------------------------------------
+  # One container with the OpenTelemetry collector, Prometheus, Tempo, Loki and Grafana. The image
+  # states it is meant for development. Applications only know the OTLP address, so moving to
+  # separate containers later changes no application code.
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    profiles: ["observability"]
+    volumes:
+      - otel-lgtm-data:/data
+    ports:
+      - "127.0.0.1:${QFE_PORT_GRAFANA:-3001}:3000"
+      - "127.0.0.1:${QFE_PORT_OTLP_HTTP:-4318}:4318"
+      - "127.0.0.1:${QFE_PORT_OTLP_GRPC:-4317}:4317"
+    restart: unless-stopped
+
+  # --- Test services (profile "test", D48) -----------------------------------------------------
+  # The same images and settings as above, started separately on other ports, with data in memory
+  # so every run starts empty and development data is never touched.
+  postgres-test:
+    extends:
+      service: postgres
+    profiles: ["test"]
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql
+    ports: !override
+      - "127.0.0.1:${QFE_TEST_PORT_POSTGRES:-15432}:5432"
+
+  rabbitmq-test:
+    extends:
+      service: rabbitmq
+    profiles: ["test"]
+    volumes: !override
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-qfe.conf:ro
+    tmpfs:
+      - /var/lib/rabbitmq
+    ports: !override
+      - "127.0.0.1:${QFE_TEST_PORT_RABBITMQ:-15673}:5672"
+
+  valkey-test:
+    extends:
+      service: valkey
+    profiles: ["test"]
+    ports: !override
+      - "127.0.0.1:${QFE_TEST_PORT_VALKEY:-16379}:6379"
+
+  storage-test:
+    extends:
+      service: storage
+    profiles: ["test"]
+    environment:
+      QFE_STORAGE_PUBLIC_URL: ${QFE_TEST_STORAGE_PUBLIC_URL:?set QFE_TEST_STORAGE_PUBLIC_URL in .env}
+    volumes: !override
+      - ./deploy/seaweedfs/entrypoint.sh:/qfe/entrypoint.sh:ro
+    tmpfs:
+      - /data
+    ports: !override
+      - "127.0.0.1:${QFE_TEST_PORT_STORAGE:-18333}:8333"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  storage-data:
+  otel-lgtm-data:

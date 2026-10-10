@@ -20,7 +20,7 @@ Approved by the user on 2026-10-10. **Nothing is implemented yet.** Before any i
 ## Phase 0: foundation
 
 - [x] FEAT-20261010-1201 — Phase 0: create the repository layout with each framework's generator (backend/src structure, frontend with create-next-app, docs folders). Depends on ISS-20261010-1154. [2026-10-10 13:22]
-- [ ] FEAT-20261010-1202 — Phase 0: build the Docker Compose stack: postgres 18, rabbitmq, valkey, seaweedfs, containers for api, worker, relay and maintenance, a one-shot migrate container, and an optional observability profile. Depends on FEAT-20261010-1201.
+- [x] FEAT-20261010-1202 — Phase 0: build the Docker Compose stack: postgres 18, rabbitmq, valkey, seaweedfs, containers for api, worker, relay and maintenance, a one-shot migrate container, and an optional observability profile. Depends on FEAT-20261010-1201. [2026-10-10 13:52]
 - [x] FEAT-20261010-1203 — Phase 0: write the configuration module that stops at startup when a required setting is missing, plus a development .env.example with obviously fake values. [2026-10-10 13:38]
 - [ ] FEAT-20261010-1204 — Phase 0: set up Alembic with its generator and write the first migration for all 11 tables in DATABASE.md, with the roles qfe_migrator and qfe_app.
 - [ ] FEAT-20261010-1205 — Phase 0: observability skeleton: JSON logs with trace id, /metrics, /healthz and /readyz, and the collector configuration.
