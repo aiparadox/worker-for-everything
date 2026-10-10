@@ -1,6 +1,6 @@
 # FEAT-20261010-1319: GitHub Actions workflow
 
-Status: **draft for approval**. Working branch: `feat-20261010-1319-github-actions`, from `master`. Depends on: `FEAT-20261010-1207` (merged). Found while writing the spec for `FEAT-20261010-1207`: `ARCHITECTURE.md` section 17 puts CI in Phase 0 and D45 chose GitHub Actions, but no task built it.
+Status: **approved by the user on 2026-10-10** (both questions answered yes; one small change at implementation: the stack job starts only the api service of the development stack, not the frontend, which the frontend job builds anyway). Working branch: `feat-20261010-1319-github-actions`, from `master`. Depends on: `FEAT-20261010-1207` (merged). Found while writing the spec for `FEAT-20261010-1207`: `ARCHITECTURE.md` section 17 puts CI in Phase 0 and D45 chose GitHub Actions, but no task built it.
 
 ## 1. What this builds and why
 
