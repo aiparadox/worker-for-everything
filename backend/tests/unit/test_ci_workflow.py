@@ -25,6 +25,12 @@ def test_it_runs_on_pushes_to_master_and_on_pull_requests() -> None:
     assert re.search(r"^  pull_request:", TEXT, re.M)
 
 
+def test_the_runner_image_is_pinned_not_latest() -> None:
+    # "ubuntu-latest" moves to a new Ubuntu release on a date we do not control.
+    assert "ubuntu-latest" not in TEXT
+    assert len(re.findall(r"runs-on: ubuntu-24\.04", TEXT)) == 3
+
+
 def test_it_can_be_started_by_hand() -> None:
     assert re.search(r"^  workflow_dispatch:", TEXT, re.M)
 
