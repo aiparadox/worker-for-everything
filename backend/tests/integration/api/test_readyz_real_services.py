@@ -5,7 +5,7 @@ import socket
 from collections.abc import AsyncIterator, Iterator
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2
 import pytest
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -56,9 +56,9 @@ async def valkey(environment: dict[str, str]) -> AsyncIterator[Redis]:
     await client.aclose()
 
 
-def client_for(engine: AsyncEngine, valkey: Redis) -> httpx.AsyncClient:
+def client_for(engine: AsyncEngine, valkey: Redis) -> httpx2.AsyncClient:
     app = create_app([postgres_check(engine), valkey_check(valkey)])
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    return httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test")
 
 
 async def test_ready_when_postgres_and_valkey_are_up(engine: AsyncEngine, valkey: Redis) -> None:

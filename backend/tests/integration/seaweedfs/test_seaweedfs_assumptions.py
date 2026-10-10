@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import boto3
-import httpx
+import httpx2
 import pytest
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -38,8 +38,8 @@ def make_policy(
     return policy
 
 
-def upload(policy: dict[str, Any], data: bytes) -> httpx.Response:
-    return httpx.post(
+def upload(policy: dict[str, Any], data: bytes) -> httpx2.Response:
+    return httpx2.post(
         policy["url"],
         data=policy["fields"],
         files={"file": ("f.txt", data, "text/plain")},
@@ -154,7 +154,7 @@ def test_a_link_signed_for_the_public_address_works_from_outside_docker(
     url = s3.generate_presigned_url(
         "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=60
     )
-    response = httpx.get(url)
+    response = httpx2.get(url)
     assert response.status_code == 200
     assert response.content == b"hello"
 
@@ -178,7 +178,7 @@ def test_a_link_signed_for_an_internal_host_name_is_refused(s3: Any, bucket: str
     )
     public = urlsplit(s3.meta.endpoint_url)
     wrong = signed.replace("http://storage-test:8333", f"{public.scheme}://{public.netloc}")
-    response = httpx.get(wrong)
+    response = httpx2.get(wrong)
     assert response.status_code == HTTP_FORBIDDEN
     assert "SignatureDoesNotMatch" in response.text or "AccessDenied" in response.text
 
@@ -199,9 +199,9 @@ def test_a_download_link_returns_the_bytes_and_expires(s3: Any, bucket: str) -> 
     url = s3.generate_presigned_url(
         "get_object", Params={"Bucket": bucket, "Key": "dl"}, ExpiresIn=2
     )
-    assert httpx.get(url).content == b"payload"
+    assert httpx2.get(url).content == b"payload"
     time.sleep(4)
-    assert httpx.get(url).status_code == HTTP_FORBIDDEN
+    assert httpx2.get(url).status_code == HTTP_FORBIDDEN
 
 
 def test_delete_removes_the_object(s3: Any, bucket: str) -> None:

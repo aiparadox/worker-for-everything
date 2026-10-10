@@ -2,13 +2,13 @@
 
 import re
 
-import httpx
+import httpx2
 
 HTTP_OK = 200
 
 
 async def test_the_api_is_alive_ready_and_traced(api_url: str) -> None:
-    async with httpx.AsyncClient(base_url=api_url, timeout=10) as http:
+    async with httpx2.AsyncClient(base_url=api_url, timeout=10) as http:
         health = await http.get("/healthz")
         ready = await http.get("/readyz")
     assert health.status_code == HTTP_OK
