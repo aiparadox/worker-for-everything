@@ -34,6 +34,8 @@ uv run pytest --cov=qfe                    # everything, with a coverage report
 
 Integration and end-to-end tests never skip quietly: when a service is not running they fail and print the command that starts it. They read `.env` and `.env.test` (copy the `.example` files).
 
+The same checks run on GitHub for every push to `master` and every pull request (`.github/workflows/ci.yml`).
+
 Frontend (`frontend/`):
 
 ```
