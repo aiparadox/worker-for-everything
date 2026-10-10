@@ -1,0 +1,38 @@
+[project]
+name = "qfe"
+version = "0.1.0"
+description = "Queue for everything: a generic queue-based job server"
+authors = [
+    { name = "aiparadox", email = "getreadyforai@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+# No dependency is added by FEAT-20261010-1201. The approved list is installed
+# by FEAT-20261010-1208 (docs/specs/FEAT-20261010-1208-dependencies.md).
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+# Tool settings (D45). The tools themselves are installed by FEAT-20261010-1208.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["qfe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--strict-markers --strict-config"

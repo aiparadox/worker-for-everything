@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+*.egg-info/
+
+# Node (the frontend has its own .gitignore too)
+node_modules/
+.next/
+
+# Local settings and secrets. Only the .example files are committed.
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

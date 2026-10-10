@@ -1,0 +1,12 @@
+# Always use LF line endings in the repository and in checkouts, so shell scripts and
+# Docker entrypoints work inside Linux containers even when checked out on Windows.
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
