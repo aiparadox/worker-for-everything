@@ -640,6 +640,14 @@ The virtual implementation (`docs/virtual-implementation/`) ended with 10 open q
 - **Found:** Starlette 1.7.0 prints a deprecation warning when its test client runs on `httpx` and asks for `httpx2` instead (PyPI: httpx2 2.13.1, github.com/pydantic/httpx2). `httpx` still works. Logged as `ISS-20261010-1320` for a decision; nothing was added.
 - **Still not proven (as the spec said):** SQLAlchemy with a real Postgres (`FEAT-1204`), the `redis` client with Valkey (`FEAT-1205`), boto3 against SeaweedFS (`FEAT-1209`), aio-pika against RabbitMQ (`FEAT-1213`), OpenTelemetry export to a collector (`FEAT-1205`).
 
+### Result of FEAT-20261010-1203: configuration module (2026-10-10)
+
+- **Built (branch `feat-20261010-1203-config`):** `qfe.config` with `base.py` (shared base, URL checks), `settings.py` (`ApiSettings`, `WorkerSettings`, `RelaySettings`, `MaintenanceSettings`, `MigrateSettings`, built from small groups so each process needs only its own), `loader.py` (`load_or_exit`). The root `.env.example` lists every required variable and every tuning variable with its default. 95 tests pass; ruff and mypy (strict, with the pydantic plugin that ships inside pydantic) pass.
+- **Behaviour proved by tests:** each required variable is required for each process and named in the error; all problems are printed at once; exit code 2; no secret value appears in errors or in `repr`; empty strings are refused; wrong URL schemes, a JWT secret under 32 characters, `*` or a path in CORS origins, a public storage URL on the same host as the internal one, telemetry `on` without an endpoint, a heartbeat not shorter than the lease, and bad `WORKER_JOB_TYPES` are all refused; the relay starts without JWT, storage or Valkey settings; defaults match the spec; `.env.example` is valid for every process and its tuning lines equal the code defaults (a test fails if they drift).
+- **Naming:** the setting called `WORKER_JOB_TYPES` in the design documents is the environment variable `QFE_WORKER_JOB_TYPES` (every variable has the `QFE_` prefix). Same for the migrator role URL: `QFE_MIGRATOR_DATABASE_URL`, separate from `QFE_DATABASE_URL`.
+- **Design choices inside the spec:** settings objects are immutable; a hidden `.env` file is never read by the code (`env_file=None`), because the environment (Compose) is the single source; unknown `QFE_` variables are ignored.
+- **Not done here:** the "telemetry off" log line (that is `FEAT-1205`), reading secrets from a secret manager (deferred, D43).
+
 ### Deferred / later (decided to postpone, not Phase 1)
 
 These were raised during review of the decision pack (2026-10-09). The user chose to log and defer them. Each has a known consequence, written here so it is a deliberate gap.
