@@ -53,6 +53,7 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 packages = ["qfe"]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
