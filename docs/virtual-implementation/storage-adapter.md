@@ -83,7 +83,7 @@ The S3 client library is `boto3` run in a thread pool (D47). `aioboto3` must not
 | Object removed (lifecycle rule, manual) after the check but before a worker reads it | The handler fails that job with a permanent error | Failed job | [NOTEPAD: D36] |
 | `delete-object` fails after the `files` row was deleted | The object stays; only the lifecycle rule would remove it | Orphan object | [DB: 10. Retention and cleanup; Object storage] [ASSUMPTION SA-08] |
 | Presigned link signed for the wrong host | Storage rejects the signature | Unusable link | [NOTEPAD: Phase 0 verification results] |
-| Whether the size check happens before or after the body is read | Not verified | Large uploads may be fully received before being refused | [NOTEPAD: Phase 0 verification results] |
+| Whether the size check happens before or after the body is read | **Measured (FEAT-20261010-1209): after.** A 64 MiB upload against a 1 MiB range was received in full and then refused with 400 EntityTooLarge; no object was created | Large uploads are fully received before being refused, so the size range protects storage but not bandwidth. A limit on request size in front of storage is a production concern (`WISH-20261010-1309`) | [NOTEPAD: Result of FEAT-20261010-1209] |
 
 ## 7. Concurrency and idempotency
 
