@@ -1,7 +1,6 @@
 """The committed .env.example must stay valid for every process, and list every tuning setting."""
 
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -15,6 +14,7 @@ from qfe.config import (
     load_or_exit,
 )
 from qfe.config.base import QfeSettings
+from tests.support.environment import read_env_file
 
 ENV_EXAMPLE = Path(__file__).resolve().parents[4] / ".env.example"
 ALL_CLASSES: list[type[QfeSettings]] = [
@@ -27,17 +27,7 @@ ALL_CLASSES: list[type[QfeSettings]] = [
 
 
 def read_values(*, include_commented: bool) -> dict[str, str]:
-    pattern = r"^#?\s*(QFE_[A-Z0-9_]+)=(.*)$" if include_commented else r"^(QFE_[A-Z0-9_]+)=(.*)$"
-    values: dict[str, str] = {}
-    for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines():
-        match = re.match(pattern, line)
-        if match:
-            values[match.group(1)] = match.group(2)
-    # Compose reads the file top to bottom and fills in ${NAME} from names defined above it.
-    resolved: dict[str, str] = {}
-    for name, value in values.items():
-        resolved[name] = re.sub(r"\$\{(\w+)\}", lambda m: resolved[m.group(1)], value)
-    return resolved
+    return read_env_file(ENV_EXAMPLE, include_commented=include_commented)
 
 
 @pytest.fixture
