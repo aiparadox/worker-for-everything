@@ -28,6 +28,7 @@ Approved by the user on 2026-10-10. **Nothing is implemented yet.** Before any i
 - [ ] FEAT-20261010-1207 — Phase 0: set up test scaffolding for unit, integration, contract and end-to-end levels, and the docs check that fails when a route has no file in docs/apis/.
 - [ ] FEAT-20261010-1208 — Phase 0: install the chosen dependency versions together in the project environment and run them, including httpx on Python 3.12 and Next.js with the TypeScript version its generator picks. Each dependency needs approval first (CLAUDE.md Module 5). Depends on ISS-20261010-1154 and ISS-20261010-1156.
 - [ ] FEAT-20261010-1209 — Phase 0: SeaweedFS end-to-end checks from outside Docker: presigned POST with a size limit, the public URL setting, HEAD, and lifecycle expiry.
+- [ ] FEAT-20261010-1319 — Phase 0: GitHub Actions workflow (D45) running ruff, mypy, the unit and contract tests, the docs check, the Compose-based integration tests and the frontend build. Side finding while writing the spec for FEAT-20261010-1207: ARCHITECTURE.md puts CI in Phase 0 but no item built it. Depends on FEAT-20261010-1207.
 
 ## Phase 1: core
 
