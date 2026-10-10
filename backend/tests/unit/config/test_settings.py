@@ -220,3 +220,13 @@ def test_a_process_does_not_need_other_processes_settings(
     # The relay must start without a JWT secret, storage or Valkey (spec section 3.2).
     set_env(monkeypatch, VALID[RelaySettings])
     assert load_or_exit(RelaySettings) is not None
+
+
+def test_an_empty_otlp_endpoint_means_not_set(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Docker Compose passes an unset variable as an empty string.
+    set_env(monkeypatch, {**VALID[RelaySettings], "QFE_OTLP_ENDPOINT": ""})
+    assert load_or_exit(RelaySettings).otlp_endpoint is None
+    monkeypatch.setenv("QFE_TELEMETRY", "on")
+    assert "QFE_OTLP_ENDPOINT" in load_failing(capsys, RelaySettings)

@@ -335,7 +335,7 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 
 **Inspecting failures:** read them through the API (`GET /v1/jobs?status=failed` and `GET /v1/jobs/{id}/attempts`) and the metric above.
 
-**Health:** `/healthz` (process is up) and `/readyz` (dependencies reachable).
+**Health:** `/healthz` (process is up) and `/readyz` (dependencies reachable). `/readyz` answers 503 only when a critical dependency is down (Postgres, the system of record); any other dependency that is down (Valkey, and later RabbitMQ and storage) is listed as `degraded` and the answer stays 200, so one partial outage does not pull every API copy out of rotation (FEAT-20261010-1205).
 
 ## 13. Testing
 

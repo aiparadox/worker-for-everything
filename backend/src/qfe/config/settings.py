@@ -23,6 +23,13 @@ class ServiceSettings(QfeSettings):
     telemetry: Literal["on", "off"]
     otlp_endpoint: str | None = None
 
+    @field_validator("otlp_endpoint", mode="before")
+    @classmethod
+    def _empty_means_not_set(cls, value: object) -> object:
+        # Docker Compose passes an unset variable as an empty string. That means "not set"; it is
+        # still required when telemetry is on (checked below), so this hides nothing.
+        return None if value == "" else value
+
     @field_validator("otlp_endpoint")
     @classmethod
     def _otlp_is_url(cls, value: str | None) -> str | None:

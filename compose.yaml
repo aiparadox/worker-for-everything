@@ -11,9 +11,17 @@
 # with a clear message when they are missing.
 #
 # The application services are added by the tasks that create their entry points: migrate
-# (FEAT-20261010-1204, here), api (-1205), relay (-1215), worker (-1216), maintenance (-1217).
+# (FEAT-20261010-1204) and api (-1205) are here; relay (-1215), worker (-1216) and maintenance
+# (-1217) come later.
 
 name: qfe
+
+# The backend image, shared by migrate, api and (later) relay, worker and maintenance.
+x-backend: &backend
+  build:
+    context: ./backend
+  image: qfe-backend:dev
+
 
 services:
   postgres:
@@ -94,9 +102,7 @@ services:
   # tables wait for it with `condition: service_completed_successfully`. The other application
   # services reuse this image (image: qfe-backend:dev) with a different command.
   migrate:
-    build:
-      context: ./backend
-    image: qfe-backend:dev
+    <<: *backend
     command: ["alembic", "upgrade", "head"]
     environment:
       QFE_MIGRATOR_DATABASE_URL: postgresql+asyncpg://qfe_migrator:${QFE_MIGRATOR_DB_PASSWORD:?set QFE_MIGRATOR_DB_PASSWORD in .env}@postgres:5432/qfe
@@ -104,6 +110,36 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+
+  api:
+    <<: *backend
+    command:
+      - uvicorn
+      - qfe.api.main:create_app_from_environment
+      - --factory
+      - --host=0.0.0.0
+      - --port=8000
+      - --no-access-log   # our own middleware writes the access line, with the trace id
+    env_file: .env
+    environment:
+      QFE_SERVICE_NAME: qfe-api
+      # From the shell or .env; set QFE_TELEMETRY=on and QFE_OTLP_ENDPOINT to send traces.
+      QFE_TELEMETRY: ${QFE_TELEMETRY:?set QFE_TELEMETRY in .env}
+      QFE_OTLP_ENDPOINT: ${QFE_OTLP_ENDPOINT:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${QFE_PORT_API:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
 
   frontend:
     build:
