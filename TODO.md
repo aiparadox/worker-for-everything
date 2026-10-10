@@ -33,7 +33,7 @@ Approved by the user on 2026-10-10. **Nothing is implemented yet.** Before any i
 
 ## Phase 1: core
 
-- [ ] FEAT-20261010-1210 — Phase 1: domain layer: the job state machine as one transition table, and the retry delay function, with unit tests for every transition.
+- [x] FEAT-20261010-1210 — Phase 1: domain layer: the job state machine as one transition table, and the retry delay function, with unit tests for every transition. Retry defaults decided as option A (4 attempts, 10 s, 2 min, 10 min, jitter 20%). [2026-10-10 18:09]
 - [ ] FEAT-20261010-1211 — Phase 1: data-access: all repositories and transactional operations (accounts, files, jobs, outbox, maintenance) as described in docs/virtual-implementation/data-access.md, with integration tests. Uses FEAT-20261010-1210. Also defines the repository interfaces (moved here from FEAT-20261010-1206).
 - [ ] FEAT-20261010-1212 — Phase 1: job type registry with the echo job type, the FileRef type, PermanentError and the handler contract.
 - [ ] FEAT-20261010-1213 — Phase 1: queue adapter on RabbitMQ (one queue per job type, publish with confirms and returns, consume, ack, nack), with contract tests.

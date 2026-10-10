@@ -230,3 +230,53 @@ def test_an_empty_otlp_endpoint_means_not_set(
     assert load_or_exit(RelaySettings).otlp_endpoint is None
     monkeypatch.setenv("QFE_TELEMETRY", "on")
     assert "QFE_OTLP_ENDPOINT" in load_failing(capsys, RelaySettings)
+
+
+# --- The default retry policy (FEAT-20261010-1210, option A) ---
+
+
+@pytest.mark.parametrize("settings_class", [ApiSettings, WorkerSettings, MaintenanceSettings])
+def test_the_default_retry_policy_is_the_users_plan(
+    monkeypatch: pytest.MonkeyPatch, settings_class: type[QfeSettings]
+) -> None:
+    set_env(monkeypatch, VALID[settings_class])
+    policy = load_or_exit(settings_class).default_retry_policy  # type: ignore[attr-defined]
+    assert policy.max_attempts == 4
+    assert policy.delays_seconds == (10, 120, 600)
+    assert policy.jitter == 0.2
+
+
+def test_the_default_retry_policy_can_be_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_env(
+        monkeypatch,
+        {
+            **VALID[WorkerSettings],
+            "QFE_DEFAULT_MAX_ATTEMPTS": "2",
+            "QFE_DEFAULT_RETRY_DELAYS_SECONDS": "30",
+            "QFE_DEFAULT_RETRY_JITTER": "0",
+        },
+    )
+    policy = load_or_exit(WorkerSettings).default_retry_policy
+    assert (policy.max_attempts, policy.delays_seconds, policy.jitter) == (2, (30.0,), 0.0)
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("QFE_DEFAULT_MAX_ATTEMPTS", "6"),  # six attempts need five delays, only three are set
+        ("QFE_DEFAULT_RETRY_DELAYS_SECONDS", "10,120"),  # too few for four attempts
+        ("QFE_DEFAULT_RETRY_DELAYS_SECONDS", "10,0,600"),
+        ("QFE_DEFAULT_RETRY_DELAYS_SECONDS", "10,soon,600"),
+        ("QFE_DEFAULT_RETRY_DELAYS_SECONDS", ""),
+        ("QFE_DEFAULT_RETRY_JITTER", "1"),
+        ("QFE_DEFAULT_RETRY_JITTER", "-0.1"),
+    ],
+)
+def test_a_bad_default_retry_policy_stops_the_process_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    variable: str,
+    value: str,
+) -> None:
+    set_env(monkeypatch, {**VALID[WorkerSettings], variable: value})
+    assert "QFE_DEFAULT" in load_failing(capsys, WorkerSettings)

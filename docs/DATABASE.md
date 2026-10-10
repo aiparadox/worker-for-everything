@@ -216,7 +216,7 @@ The central table. Read and written constantly.
 | error | jsonb | `{code, message, retryable}` of the last failure |
 | progress | smallint NOT NULL | 0 to 100. Default 0 |
 | attempts | integer NOT NULL | Tries used so far. Default 0 |
-| max_attempts | integer NOT NULL | From the job type's settings at submit time. Counts the first run plus the retries. The default is the setting `QFE_MAX_ATTEMPTS` (3 in development, `FEAT-20261010-1203`) |
+| max_attempts | integer NOT NULL | From the job type's settings at submit time. Counts the first run plus the retries. The default comes from the job type's retry policy, or from `QFE_DEFAULT_MAX_ATTEMPTS` (4: the first run plus 3 retries) for a type that defines none (`FEAT-20261010-1210`) |
 | priority | smallint NOT NULL | **Phase 2.** Default 0. Stored now, not used yet |
 | run_at | timestamptz NOT NULL | **Do not run before this time.** Default `now()`. Set to `now() + delay` on a retry (D24). Used from Phase 1. `outbox.run_at` is a copy for fast relay lookups |
 | cancel_requested | boolean NOT NULL | **Phase 2.** Default `false`. Stored now, not used yet |
