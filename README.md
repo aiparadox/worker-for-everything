@@ -38,4 +38,23 @@ npm run build
 npm run dev
 ```
 
-The Docker Compose stack, the database migrations and the integration tests are described here as they are added.
+## Docker Compose stack
+
+Needs Docker with Compose. Settings come from `.env`; start from the example (all values are fake, for development only):
+
+```
+cp .env.example .env
+docker compose up -d --wait                    # postgres, rabbitmq, valkey, storage, frontend
+docker compose --profile observability up -d   # adds Grafana, traces, logs and metrics
+docker compose down                            # stop; add -v to also delete the data
+```
+
+Everything is published on `127.0.0.1` only. Host ports: Postgres 5433, RabbitMQ 5672 (management page 15672), Valkey 6379, storage S3 8333, frontend 3100, Grafana 3001, OTLP 4317 and 4318. They differ from the usual defaults for Postgres (5432) and the frontend (3000) because those are often taken on a development machine; every port can be changed in `.env`.
+
+Separate, empty services for the tests (data in memory, other ports; D48):
+
+```
+docker compose --profile test up -d --wait postgres-test rabbitmq-test valkey-test storage-test
+```
+
+The application services (migrate, api, relay, worker, maintenance) are added to `compose.yaml` by the tasks that create them. The database migrations and the integration tests are described here as they are added.
