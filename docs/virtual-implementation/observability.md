@@ -33,7 +33,7 @@ Structured JSON. Every line carries `trace_id` and `span_id`, and where known `o
 
 ### 2.3 `metrics-endpoint`
 
-`/metrics` exposes: request rate and latency, queue depth per job type, job duration by type, retries, `jobs_failed_total` by job type and error code, sweep re-queues, stuck outbox rows, rate limit rejections, and Redis fallback events. `job_type` is a safe label; `org_id` and `job_id` are not. [ARCH: 12. Observability] RabbitMQ's own Prometheus metrics supply queue depth and consumer counts. [ARCH: 12. Observability] [NOTEPAD: D28] The Postgres exporter supplies connections, locks, replication lag, bloat and slow queries. [DB: 9. Performance and tuning plan] Which processes expose the endpoint is not stated. [ASSUMPTION A-12]
+`/metrics` exposes: request rate and latency, queue depth per job type, job duration by type, retries, `jobs_failed_total` by job type and error code, sweep re-queues, stuck outbox rows, rate limit rejections, and Valkey fallback events. `job_type` is a safe label; `org_id` and `job_id` are not. [ARCH: 12. Observability] RabbitMQ's own Prometheus metrics supply queue depth and consumer counts. [ARCH: 12. Observability] [NOTEPAD: D28] The Postgres exporter supplies connections, locks, replication lag, bloat and slow queries. [DB: 9. Performance and tuning plan] Which processes expose the endpoint is not stated. [ASSUMPTION A-12]
 
 ### 2.4 `health-endpoints`
 
@@ -48,7 +48,7 @@ Structured JSON. Every line carries `trace_id` and `span_id`, and where known `o
 | Elevated failed-job rate | [ARCH: 12. Observability] [NOTEPAD: D25] |
 | Sweep re-queues | [ARCH: 12. Observability] [NOTEPAD: D27] |
 | A stuck outbox row | [ARCH: 12. Observability] |
-| Redis fallback | [ARCH: 12. Observability] [ARCH: 9. Rate limiting] |
+| Valkey fallback | [ARCH: 12. Observability] [ARCH: 9. Rate limiting] |
 | Elevated error rates | [ARCH: 12. Observability] |
 
 Thresholds and who is notified are not stated. [ASSUMPTION OBS-05]
@@ -87,7 +87,7 @@ The stack may be switched off for light local work. [ARCH: 19. Known risks] Comp
 | Collector, Tempo, Loki or Prometheus down | Whether processes keep serving without blocking on export is not stated | Gaps in telemetry | [ASSUMPTION OBS-08] |
 | Missing or malformed `traceparent` | A new trace id is generated | New trace | [ARCH: 12. Observability] |
 | Client sends a trace id it chose | Logs of this request carry that value | Possible correlation noise | [ASSUMPTION OBS-09] |
-| `/readyz` includes Redis or RabbitMQ | An outage of either would make the API look unready, though submits do not need the broker and the Redis limits fail open by design | Possible self-inflicted API outage | [ARCH: 9. Rate limiting] [DB: outbox] [ASSUMPTION OBS-06] |
+| `/readyz` includes Valkey or RabbitMQ | An outage of either would make the API look unready, though submits do not need the broker and the Valkey limits fail open by design | Possible self-inflicted API outage | [ARCH: 9. Rate limiting] [DB: outbox] [ASSUMPTION OBS-06] |
 | Alert thresholds missing | Alerts cannot fire | Silent failures | [ASSUMPTION OBS-05] |
 | `/metrics` unreachable from Prometheus | No metrics for that process | Blind spot | [ASSUMPTION A-12] |
 

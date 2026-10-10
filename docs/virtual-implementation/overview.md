@@ -30,7 +30,7 @@ Interface names such as `accounts-auth#login` are labels chosen for cross-refere
 | 2 | `accounts-auth` | Signup, login, refresh, logout, organisations and memberships, API key lifecycle, and checking both credential kinds | `api` container | [ARCH: 8. Authentication and authorisation] [ARCH: Containers (Docker Compose)] |
 | 3 | `job-api` | Submit, list and read jobs, read attempts, list job types | `api` container | [ARCH: 14. API documentation rules] [ARCH: Containers (Docker Compose)] |
 | 4 | `file-api` | Upload links, file lookup, input file checks at submit, result download links | `api` container | [ARCH: 14. API documentation rules] [NOTEPAD: D31] |
-| 5 | `rate-limiter` | Request limits, 429 answers, fail-open and fail-closed rules | `api` container (Redis behind the `RateLimiter` port) | [ARCH: 9. Rate limiting] [ARCH: 6. Code structure and the adapter rule] |
+| 5 | `rate-limiter` | Request limits, 429 answers, fail-open and fail-closed rules | `api` container (Valkey behind the `RateLimiter` port) | [ARCH: 9. Rate limiting] [ARCH: 6. Code structure and the adapter rule] |
 | 6 | `job-type-registry` | Job type definitions: name, version, schemas, `FileRef`, retry settings, retry delay duration | Library loaded by api, relay and worker | [ARCH: 10. Job types and handlers (how new work plugs in)] [ARCH: 6. Code structure and the adapter rule] |
 | 7 | `data-access` | The Postgres adapter: repositories and every transactional operation (submit, claim, heartbeat, finish, retry, recover, sweep, cleanups) | Library used by every process that touches Postgres | [DB: 1. Principles] [ARCH: 6. Code structure and the adapter rule] |
 | 8 | `outbox-relay` | Publishes due outbox rows to RabbitMQ | `relay` container | [ARCH: Containers (Docker Compose)] [NOTEPAD: D12] |
@@ -41,7 +41,7 @@ Interface names such as `accounts-auth#login` are labels chosen for cross-refere
 | 13 | `observability` | Trace ID propagation, JSON logs, metrics, alerts, health endpoints | Every process, plus the collector stack | [ARCH: 12. Observability] |
 | 14 | `platform` | Docker Compose topology, startup configuration checks, migrations, database roles | All containers | [ARCH: 15. Configuration] [DB: 12. Migrations and change process] |
 
-Not parts: PostgreSQL, RabbitMQ, Redis, SeaweedFS and the Grafana, Loki, Tempo, Prometheus and collector stack. They are reached through the adapters above. [ARCH: 6. Code structure and the adapter rule] [ARCH: 12. Observability]
+Not parts: PostgreSQL, RabbitMQ, Valkey, SeaweedFS and the Grafana, Loki, Tempo, Prometheus and collector stack. They are reached through the adapters above. [ARCH: 6. Code structure and the adapter rule] [ARCH: 12. Observability]
 
 ---
 
@@ -87,7 +87,7 @@ flowchart LR
 
   PG[(PostgreSQL 18)]
   MQ[[RabbitMQ: one queue per job type]]
-  RD[(Redis)]
+  RD[(Valkey)]
   S3[(SeaweedFS)]
   OT[OTel collector, Tempo, Loki, Prometheus, Grafana]
 
@@ -144,7 +144,7 @@ The edges come from ARCH section 4 and section 11, and the table in section 4 gi
 ### F1. Signup and login
 
 1. The user submits the signup form in `frontend`, which calls `accounts-auth#signup`. [ARCH: 8. Authentication and authorisation] [ASSUMPTION A-02]
-2. Before the handler runs, `rate-limiter#check-request-limit` applies the login and signup per-IP limit, which fails closed when Redis is down. [ARCH: 9. Rate limiting]
+2. Before the handler runs, `rate-limiter#check-request-limit` applies the login and signup per-IP limit, which fails closed when Valkey is down. [ARCH: 9. Rate limiting]
 3. `accounts-auth` accepts any email address, because email verification is deferred. [ARCH: 8. Authentication and authorisation] [DEFERRED: email verification and the email sender]
 4. The password is hashed with Argon2 behind the `AuthProvider` port. [ARCH: 8. Authentication and authorisation]
 5. `accounts-auth` calls `data-access#create-user-with-org`, which writes the user, a `password` identity whose `provider_subject` is the user's own id, a new organisation, and a membership with role `owner`. [DB: users] [DB: auth_identities.provider_subject] [DB: organisations] [DB: memberships.role] [ARCH: 8. Authentication and authorisation] Whether these four writes are one transaction, and how the organisation `slug` is chosen, are not stated. [ASSUMPTION A-04]
@@ -210,13 +210,13 @@ The edges come from ARCH section 4 and section 11, and the table in section 4 gi
 4. A duplicate message is harmless: the claim refuses a job that is running, finished or not yet due, and the worker acks and logs. [ARCH: 11. Reliability and delivery]
 5. A crash before the claim commits leaves the message unacked, so RabbitMQ redelivers it. [ARCH: 5. Life of a job]
 
-### F8. A limited request, and Redis down
+### F8. A limited request, and Valkey down
 
 1. Over a limit, the API answers `429` with a `Retry-After` header and a JSON error body, and ordinary responses carry rate limit headers. [ARCH: 9. Rate limiting]
 2. The active-jobs cap is counted in Postgres inside the submit transaction, up to the cap, under the organisation's advisory lock. [ARCH: 9. Rate limiting] [DB: jobs.organisation_id; §6] The response code and `Retry-After` value when the cap is hit are not stated separately from the generic 429 rule. [ASSUMPTION A-10]
-3. If Redis is down, the API, organisation, refresh and logout limits fail open: requests pass, and the system logs an error, increments a metric and raises an alert. [ARCH: 9. Rate limiting]
-4. If Redis is down, login and signup limits fail closed and requests are rejected. [ARCH: 9. Rate limiting]
-5. The active-jobs cap keeps working during a Redis outage. [ARCH: 9. Rate limiting] [NOTEPAD: D29]
+3. If Valkey is down, the API, organisation, refresh and logout limits fail open: requests pass, and the system logs an error, increments a metric and raises an alert. [ARCH: 9. Rate limiting]
+4. If Valkey is down, login and signup limits fail closed and requests are rejected. [ARCH: 9. Rate limiting]
+5. The active-jobs cap keeps working during a Valkey outage. [ARCH: 9. Rate limiting] [NOTEPAD: D29]
 6. Behind a proxy or load balancer, Phase 1 reads the connection's address, so per-IP limits see one address for all users. [ARCH: 9. Rate limiting] [DEFERRED: trusted-proxy setting and per-email login limit]
 
 ---
@@ -233,7 +233,7 @@ The edges come from ARCH section 4 and section 11, and the table in section 4 gi
 | 4 | API client → `file-api` | `create-upload-link`, `get-file` | HTTP with an API key | Sync | [ARCH: 14. API documentation rules] |
 | 5 | API client → SeaweedFS | Presigned upload link | File bytes over HTTP | Sync | [NOTEPAD: D31] |
 | 6 | `accounts-auth`, `job-api`, `file-api` → `rate-limiter` | `check-request-limit` | In-process call with the credential, the IP and the endpoint class | Sync | [ARCH: 9. Rate limiting] [ASSUMPTION A-08] |
-| 7 | `rate-limiter` → Redis | Counters | Redis protocol | Sync | [ARCH: 9. Rate limiting] |
+| 7 | `rate-limiter` → Valkey | Counters | Valkey protocol | Sync | [ARCH: 9. Rate limiting] |
 | 8 | `job-api`, `file-api`, `accounts-auth` → `accounts-auth` | `verify-api-key`, `verify-access-token` | In-process call returning the organisation and scopes | Sync | [ARCH: 8. Authentication and authorisation] [ASSUMPTION A-07] |
 | 9 | `job-api`, `worker` → `job-type-registry` | `validate-payload`, `get-job-type`, `list-registered-types`, `next-retry-delay` | In-process calls | Sync | [ARCH: 10. Job types and handlers (how new work plugs in)] |
 | 10 | `job-api` → `file-api` | `verify-input-files` | In-process call with the organisation and the file ids | Sync | [ARCH: 5. Life of a job] |
@@ -326,7 +326,7 @@ These are the ones raised by this file. Every assumption and conflict from all 1
 
 ID A-03 is not used (it was merged into A-02).
 
-Conflicts C-01 (count of Redis limits), C-03 (stale notepad entries) and C-05 (file removal mechanism) concern text outside the flows above and are written up in the part files and `findings.md`. They were already named in Phase 1.
+Conflicts C-01 (count of Valkey limits), C-03 (stale notepad entries) and C-05 (file removal mechanism) concern text outside the flows above and are written up in the part files and `findings.md`. They were already named in Phase 1.
 
 Part files use their own ID prefix for what they add: `DA-01` for `data-access`, `JTR-` for `job-type-registry`, `QA-` for `queue-adapter`, `SA-` for `storage-adapter`, `RLY-` for `outbox-relay`, `WK-` for `worker`, `MT-` for `maintenance`, `AA-` for `accounts-auth`, `JA-` for `job-api`, `FA-` for `file-api`, `RL-` for `rate-limiter`, `FE-` for `frontend`, `OBS-` for `observability`, `PLT-` for `platform`. A conflict found inside a part file is written `[CONFLICT DA-C1]`, and so on. [ASSUMPTION A-01]
 

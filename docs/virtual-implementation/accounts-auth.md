@@ -28,7 +28,7 @@ Paths, wire formats and status codes are not defined in the sources beyond the e
 | Effect | Creates the user, a `password` identity, a first organisation and an `owner` membership. Where the organisation name comes from is not stated | [NOTEPAD: D30] [DB: memberships.role] [ASSUMPTION AA-01] |
 | Response | Not stated whether signup also logs the user in | [ASSUMPTION AA-03] |
 | Errors | Email already taken; invalid input; rate limited (429) | [DB: users] [ARCH: 9. Rate limiting] |
-| Limit | Login and signup per IP, which fails closed when Redis is down | [ARCH: 9. Rate limiting] |
+| Limit | Login and signup per IP, which fails closed when Valkey is down | [ARCH: 9. Rate limiting] |
 
 ### 2.2 `login`
 
@@ -162,8 +162,8 @@ The libraries are PyJWT and `pwdlib` with Argon2, behind the `AuthProvider` port
 | Two signups with the same email | The unique index on `lower(email)` lets one win | None | [DB: users] |
 | Login: database down | Login fails; existing access tokens keep working until they expire | None | [ARCH: 8. Authentication and authorisation] |
 | Refresh: reuse after the window | Whole family revoked; the user logs in again | Revoked tokens | [DB: refresh_tokens.revoked_at] |
-| Refresh: Redis down | Refresh limits fail open, so refresh keeps working | None | [ARCH: 9. Rate limiting] |
-| Login or signup: Redis down | Rejected (fail closed) | None | [ARCH: 9. Rate limiting] |
+| Refresh: Valkey down | Refresh limits fail open, so refresh keeps working | None | [ARCH: 9. Rate limiting] |
+| Login or signup: Valkey down | Rejected (fail closed) | None | [ARCH: 9. Rate limiting] |
 | Key creation: prefix collision | Retried with a new prefix | None | [ASSUMPTION DA-04] |
 | `verify-api-key`: database down | Every API-key call fails; no job can be submitted or read | None | [DB: 1. Principles] |
 | Revoked key in use | Rejected on the next request | None | [DB: api_keys.revoked_at] |

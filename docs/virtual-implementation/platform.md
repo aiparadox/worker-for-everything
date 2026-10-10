@@ -21,7 +21,7 @@ Part 14 of 14. Draft for review. Tags are explained in [overview.md](overview.md
 | `api`, `worker` (one or more pools), `relay`, `maintenance`, `frontend` | Application containers; `api`, `worker`, `relay` and `maintenance` use the same image with different commands | [ARCH: Containers (Docker Compose)] |
 | `postgres` (version 18) | System of record | [ARCH: Containers (Docker Compose)] [NOTEPAD: D13] |
 | `rabbitmq` | One queue per job type | [ARCH: Containers (Docker Compose)] [NOTEPAD: D28] |
-| `redis` | Rate limit counters only | [ARCH: Containers (Docker Compose)] |
+| `valkey` | Rate limit counters only | [ARCH: Containers (Docker Compose)] |
 | `storage` (SeaweedFS) | Documents, scans, results | [ARCH: Containers (Docker Compose)] [NOTEPAD: D20] |
 | `otel-collector`, `tempo`, `loki`, `prometheus`, `grafana` | Observability; can be switched off for light local work | [ARCH: Containers (Docker Compose)] [ARCH: 19. Known risks] |
 | a one-shot `migrate` container | Runs Alembic before the API and workers start | [DB: 12. Migrations and change process] |
@@ -34,7 +34,7 @@ Everything required to run is validated at startup. A missing or invalid value s
 
 | Kind | Settings named in the sources | Source |
 |---|---|---|
-| Required | Database URL and credentials; broker URL and credentials; Redis URL; storage credentials and bucket; the public storage URL used in presigned links; JWT signing secret, issuer and audience; `WORKER_JOB_TYPES` for workers | [ARCH: 15. Configuration] [ARCH: 8. Authentication and authorisation] [NOTEPAD: D31] |
+| Required | Database URL and credentials; broker URL and credentials; Valkey URL; storage credentials and bucket; the public storage URL used in presigned links; JWT signing secret, issuer and audience; `WORKER_JOB_TYPES` for workers | [ARCH: 15. Configuration] [ARCH: 8. Authentication and authorisation] [NOTEPAD: D31] |
 | Tuning (defaults still to be written) | Lease length, heartbeat interval, worker concurrency, wait before a delivered message is handed back, sweep wait and cap, sweep batch size, retry delays and max attempts, active-jobs cap, request rate limits, presigned URL lifetime, file size cap, pending-file expiry, job and outbox retention, payload and result size caps, token lifetimes, refresh reuse window, absolute login lifetime | [ARCH: 15. Configuration] |
 
 Which process needs which required setting is not stated. [ASSUMPTION PLT-01]
@@ -66,13 +66,13 @@ Which process needs which required setting is not stated. [ASSUMPTION PLT-01]
 | From | Interface | How it is used |
 |---|---|---|
 | Docker and Docker Compose | Container runtime | Runs the stack. The Windows development machine has Docker 29.5.2 and Compose 5.1.3 | [NOTEPAD: 2. Environment snapshot (checked 2026-10-08)] |
-| Image registries | Images for the services | Exact tags are not pinned yet. Candidates exist for `postgres:18`, `python:3.14-slim`, `rabbitmq:4-management`, `redis:8` or `valkey/valkey:8`, `chrislusf/seaweedfs`, `node:22-slim` and the Grafana stack | [NOTEPAD: Phase 0 verification results] |
+| Image registries | Images for the services | Exact tags are not pinned yet. Candidates exist for `postgres:18`, `python:3.12-slim` (D41), `rabbitmq:4-management`, `valkey/valkey:8` (D42), `chrislusf/seaweedfs`, `node:22-slim` and the Grafana stack | [NOTEPAD: Phase 0 verification results] |
 
 ## 4. Data
 
 **Tables:** it creates and changes the schema but reads and writes no rows of its own. [DB: 12. Migrations and change process]
 
-**Persistent state to keep:** the Postgres data, RabbitMQ durable queues, SeaweedFS data, and Redis counters if persisted. Volumes, backups and Redis persistence are not described. [ARCH: Containers (Docker Compose)] [ASSUMPTION PLT-09]
+**Persistent state to keep:** the Postgres data, RabbitMQ durable queues, SeaweedFS data, and Valkey counters if persisted. Volumes, backups and Valkey persistence are not described. [ARCH: Containers (Docker Compose)] [ASSUMPTION PLT-09]
 
 **Who else touches it:** every container reads its configuration from here. [ARCH: 15. Configuration]
 
@@ -80,7 +80,7 @@ Which process needs which required setting is not stated. [ASSUMPTION PLT-01]
 
 ### 5.1 Starting the stack
 
-1. Postgres, RabbitMQ, Redis and storage start. [ARCH: Containers (Docker Compose)]
+1. Postgres, RabbitMQ, Valkey and storage start. [ARCH: Containers (Docker Compose)]
 2. The `migrate` container applies migrations with the migrator role and exits. [DB: 12. Migrations and change process]
 3. The API, relay, workers and maintenance start; each validates its configuration and stops if something required is missing. [ARCH: 15. Configuration]
 4. Every process that knows a job type declares its queue at startup. [ARCH: 11. Reliability and delivery] Whether a process that cannot reach RabbitMQ at that moment refuses to start is not stated. [ASSUMPTION PLT-04]
@@ -124,7 +124,7 @@ Which process needs which required setting is not stated. [ASSUMPTION PLT-01]
 Load assumptions are in [overview.md](overview.md) section 8. [ASSUMPTION L-01]
 
 - **Weight:** all services in one Compose file is heavy on a development machine; the observability stack can be switched off. [ARCH: 19. Known risks]
-- **Scaling knobs:** API and frontend scale horizontally, workers per pool, relays are "a small number", Postgres vertically with read replicas later, Redis single, later cluster. [ARCH: Containers (Docker Compose)]
+- **Scaling knobs:** API and frontend scale horizontally, workers per pool, relays are "a small number", Postgres vertically with read replicas later, Valkey single, later cluster. [ARCH: Containers (Docker Compose)]
 - **Connections:** at the assumed number of worker processes, Postgres connection limits and PgBouncer's absence matter. [ASSUMPTION WK-10] [ASSUMPTION L-02]
 - **Startup time** is not discussed. [ASSUMPTION PLT-04]
 
@@ -138,7 +138,7 @@ Load assumptions are in [overview.md](overview.md) section 8. [ASSUMPTION L-01]
 
 ## 10. Open questions and deferred items
 
-- Python 3.14 or 3.12, SQLAlchemy 2.1 or 2.0, Redis or Valkey, the S3 client path, and the integration test setup. [NOTEPAD: Phase 0 verification results] [ARCH: 18. Open items]
+- Decided since this was written: Python 3.12 (D41), Valkey (D42), SQLAlchemy 2.1 (D46), boto3 in a thread pool (D47), Compose test profile (D48). Nothing left open in this line. [NOTEPAD: Phase 0 verification results] [ARCH: 18. Open items]
 - Defaults for all tuning settings. [ARCH: 15. Configuration]
 - Which process needs which setting; secret delivery and rotation; role and bucket bootstrap; ingress and TLS; published ports; backups and volumes; CI tool. [ASSUMPTION PLT-01] [ASSUMPTION PLT-02] [ASSUMPTION PLT-03] [ASSUMPTION PLT-05] [ASSUMPTION PLT-06] [ASSUMPTION PLT-09] [ASSUMPTION PLT-10]
 - Tested down-migrations and partitioning. [DEFERRED: tested down-migrations] [DEFERRED: time partitioning of jobs]

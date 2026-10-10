@@ -76,7 +76,7 @@ The browser reaches the API on the same site as the frontend, either directly or
 | Network error during create key | The user does not know whether a key exists; retrying creates a second one | Possibly an unseen key | [DB: api_keys] [ASSUMPTION FE-04] |
 | User leaves the page after create key | The full key is lost; it was shown once and only a hash is stored | A key nobody can use | [ARCH: 8. Authentication and authorisation] |
 | API rate limited (429) | How the app shows it is not stated | None | [ARCH: 9. Rate limiting] [ASSUMPTION FE-07] |
-| Redis down | Login and signup are rejected; refresh keeps working | Logged-in users keep working | [ARCH: 9. Rate limiting] |
+| Valkey down | Login and signup are rejected; refresh keeps working | Logged-in users keep working | [ARCH: 9. Rate limiting] |
 | Frontend and API on different sites | The refresh cookie is not sent, so login does not persist | Broken login | [ARCH: 8. Authentication and authorisation] |
 | Cookies blocked | Refresh cannot work | Broken login | [ASSUMPTION FE-03] |
 

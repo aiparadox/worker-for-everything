@@ -2,6 +2,8 @@
 
 Phase 5. Written from the 14 part files and the overview, which were written from `ARCHITECTURE.md`, `DATABASE.md` and `NOTEPAD.md` (all read-only and untouched). Tags are explained in [overview.md](overview.md) section 0. Nothing here has been applied to the sources.
 
+**Note added 2026-10-10:** this file records the review as it was written, so it still says "Redis" and quotes the older open questions. Read "Redis" as Valkey (D42). Python 3.12 (D41), SQLAlchemy 2.1 (D46), boto3 in a thread pool (D47) and the Compose test profile (D48) have since been decided. The other part files and the two design docs were updated for these decisions.
+
 How to read it:
 - **Section 2** lists real problems: things wrong or missing in the documented design whatever the load is.
 - **Section 3** lists risks that only bite if a condition is true. They are kept apart on purpose.

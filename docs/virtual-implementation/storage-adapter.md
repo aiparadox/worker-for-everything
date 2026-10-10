@@ -38,7 +38,7 @@ The handler receives "the storage adapter" in its context, so `read-object` and 
 
 Two addresses are probably needed: the public one that is signed into links, and an internal one for server-side calls from inside Docker. The sources require only the public one. [NOTEPAD: Phase 0 verification results] [ASSUMPTION SA-01]
 
-The S3 client library is not chosen: `aiobotocore`, or plain `boto3` in a thread pool. `aioboto3` must not be used. [ARCH: 18. Open items] [NOTEPAD: Phase 0 verification results]
+The S3 client library is `boto3` run in a thread pool (D47). `aioboto3` must not be used. [ARCH: 18. Open items] [NOTEPAD: Phase 0 verification results]
 
 ## 4. Data
 
@@ -114,7 +114,7 @@ Load assumptions are in [overview.md](overview.md) section 8. [ASSUMPTION L-01]
 ## 10. Open questions and deferred items
 
 - Plain presigned upload URL versus presigned POST policy: the response shape of the upload link depends on it. [CONFLICT C-04]
-- S3 client path: `aiobotocore` or `boto3` in a thread pool. [ARCH: 18. Open items]
+- S3 client path: decided, `boto3` in a thread pool (D47). [ARCH: 18. Open items]
 - Whether `expires_at` on `files` is cleared when a file becomes `available`, and what removes available files that no job ever used. [DB: files.expires_at] [ASSUMPTION DA-07]
 - SeaweedFS end-to-end checks from outside Docker, lifecycle expiry, and where the size check happens. [NOTEPAD: Phase 0 verification results]
 - Multipart upload and virus scanning. [DEFERRED: multipart upload for very large files] [DEFERRED: virus or content scanning of uploads]

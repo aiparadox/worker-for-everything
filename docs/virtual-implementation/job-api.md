@@ -29,7 +29,7 @@ All five need an API key. Browser logins cannot call the job APIs. [ARCH: 8. Aut
 | Same key, same request | Returns the existing job. The status code is not stated | [ARCH: 7. Data model] [ASSUMPTION A-09] |
 | Same key, different request | A conflict, decided by comparing the stored `request_hash` | [DB: jobs.request_hash] |
 | Errors | Unknown type; invalid payload; too large; file problems; idempotency conflict; active-jobs cap reached (429); other rate limits (429) | [ARCH: 5. Life of a job] [ARCH: 9. Rate limiting] [ASSUMPTION JA-03] |
-| Limits | Per key and per organisation (Redis, fail open); active-jobs cap (Postgres, exact) | [ARCH: 9. Rate limiting] |
+| Limits | Per key and per organisation (Valkey, fail open); active-jobs cap (Postgres, exact) | [ARCH: 9. Rate limiting] |
 
 ### 2.2 `get-job` (`GET /v1/jobs/{id}`)
 
@@ -104,7 +104,7 @@ Sources: [ARCH: 5. Life of a job] [ARCH: 10. Job types and handlers (how new wor
 | `submit-job-tx` fails before commit | Nothing written; the client gets an error and may retry | None | [DB: jobs; §5 Submit job] |
 | Response lost after commit | The job exists and will run, but the client does not know. With an idempotency key a retry returns it; without a key a retry creates a second job | A job the client did not see | [ARCH: 7. Data model] [ASSUMPTION JA-08] |
 | Cap reached | Rejected with a rate-limit style answer | None | [ARCH: 9. Rate limiting] |
-| Redis down | Request limits fail open; the cap still works | None | [ARCH: 9. Rate limiting] |
+| Valkey down | Request limits fail open; the cap still works | None | [ARCH: 9. Rate limiting] |
 | Database down | Every job endpoint fails | None | [DB: 1. Principles] |
 | Repeat of an earlier submit | File checks run again first and can fail before the idempotency check returns the existing job | None | [CONFLICT C-02] |
 

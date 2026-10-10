@@ -333,7 +333,7 @@ The relay (`outbox.run_at <= now()`) and the claim (`jobs.run_at <= now()`) both
 
 ## 6. The active-jobs cap (D29)
 
-The cap is counted in Postgres, not Redis. A live count of jobs is not a rate, and a Redis counter can drift from the truth if a worker crashes. Redis keeps only the three request-rate limits.
+The cap is counted in Postgres, not Valkey. A live count of jobs is not a rate, and a Valkey counter can drift from the truth if a worker crashes. Valkey keeps only the three request-rate limits.
 
 **Keep the count cheap.** Counting every live job gets slower as an organisation's backlog grows. So the check counts only up to the cap:
 
@@ -365,7 +365,7 @@ If two requests with the same idempotency key still collide, the unique-violatio
 | Data | Where | Why |
 |---|---|---|
 | File contents (inputs, results) | Object storage (SeaweedFS in Docker, D20), referenced by `files` | Keeps rows small (D6) |
-| Rate limit counters (the three request-rate limits) | Redis | Fast and expiring (D17) |
+| Rate limit counters (the three request-rate limits) | Valkey | Fast and expiring (D17) |
 | Queue messages | RabbitMQ, one queue per job type | Delivery only (D5, D28) |
 
 The truth about a failed job is `jobs.status = 'failed'` plus its `job_attempts` rows (D25).
@@ -437,7 +437,7 @@ Other growth levers, in order of effort: shorter retention; archive old rows to 
 | A2 | Browser sessions stored server-side in `sessions` | **Replaced** by access and refresh tokens (D32): `sessions` is gone, `refresh_tokens` takes its place |
 | A3 | Three roles: `owner`, `admin`, `member` | **Approved** (D34) |
 | A4 | API keys use SHA-256 (random keys), passwords use Argon2 | **Approved** (D34) |
-| A5 | Active-jobs cap counted in Postgres, not Redis | **Approved** (D29) |
+| A5 | Active-jobs cap counted in Postgres, not Valkey | **Approved** (D29) |
 | A6 | A few jobs over the cap under concurrent submits is acceptable | **Replaced** (D29 amended): the cap is exact, using an advisory lock per organisation |
 | A7 | No partitioning in Phase 1, with the idempotency-table plan for later | **Approved** (D34) |
 | A8 | Tenant isolation enforced in application code, scoped by `organisation_id` in every query | **Approved** (D34), on the condition of a contract test proving one organisation can never read another's jobs or files through any repository method |

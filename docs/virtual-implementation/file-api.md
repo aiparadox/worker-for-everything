@@ -27,7 +27,7 @@ Part 4 of 14. Draft for review. Tags are explained in [overview.md](overview.md)
 | Response | `file_id` and an upload URL. A presigned POST policy also needs form fields; the decision names only a "presigned upload URL" | [NOTEPAD: D31] [NOTEPAD: Phase 0 verification results] [CONFLICT C-04] |
 | Effect | A `files` row with `status = pending`, `kind = input`, a server-generated `storage_key` namespaced by organisation, and an `expires_at` | [DB: files.status] [DB: files.storage_key] [DB: files.expires_at] [ARCH: 16. Security notes] |
 | Errors | Invalid input; size over the cap; rate limited (429) | [ARCH: 9. Rate limiting] [ASSUMPTION FA-03] |
-| Limit | Per key and per organisation, both fail open when Redis is down | [ARCH: 9. Rate limiting] |
+| Limit | Per key and per organisation, both fail open when Valkey is down | [ARCH: 9. Rate limiting] |
 
 ### 2.2 `get-file` (`GET /v1/files/{id}`)
 

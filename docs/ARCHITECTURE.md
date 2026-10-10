@@ -69,7 +69,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
                          +--+-----+--+                             +-----+------+
                             |     |  rate limit counters                 ^
                             |     +---------------> +-------+            |
-                            |                       | redis |            |
+                            |                       |valkey |            |
                             | presigned URLs        +-------+            |
                             v                                            |
                          +-------+      reads outbox            +--------+--+
@@ -96,7 +96,7 @@ It must work for any kind of work: document processing, OCR pipelines, content g
 | `frontend` | Next.js app | Horizontally |
 | `postgres` | System of record for everything | Vertical, read replicas later |
 | `rabbitmq` | Delivers "job is ready" messages, one queue per job type | Cluster |
-| `redis` | Rate limit counters only | Single, later cluster |
+| `valkey` | Rate limit counters only | Single, later cluster |
 | `storage` (SeaweedFS) | Documents, scans, results. Shown as `store` in the diagram | Distributed mode |
 | `otel-collector`, `tempo`, `loki`, `prometheus`, `grafana` | Observability | See section 12 |
 
@@ -154,7 +154,7 @@ backend/
   src/
     domain/          Pure business rules. Job, Organisation, ApiKey, state transitions, retry delay calculation.
     ports/           Interfaces only (see table below).
-    adapters/        One folder per technology: postgres/, rabbitmq/, s3/ (object storage), redis/, password_auth/
+    adapters/        One folder per technology: postgres/, rabbitmq/, s3/ (object storage), valkey/, password_auth/
     application/     Use cases (SubmitJob, CreateApiKey, CreateUploadLink, ...). Depend on ports only.
     job_types/       Light definitions: name, version, input and output schemas, retry settings. No heavy imports.
     handlers/        Handler implementations. May import heavy libraries (OCR and so on). Only workers load them.
@@ -179,7 +179,7 @@ docs/                ARCHITECTURE.md, DATABASE.md, apis/, adr/, specs/, discussi
 |---|---|---|
 | `QueueAdapter` | RabbitMQ, one queue per job type | Postgres queue, Redis Streams, SQS |
 | `StorageAdapter` | SeaweedFS (S3 API) | AWS S3, GCS, local disk |
-| `RateLimiter` | Redis | In-memory (tests), other stores |
+| `RateLimiter` | Valkey | In-memory (tests), other stores |
 | `AuthProvider` | Email and password | Google, GitHub, other OAuth |
 | `JobRepository` and other repositories | PostgreSQL | Other databases |
 | `Clock`, `IdGenerator` | System clock, UUIDv7 | Fakes in tests |
@@ -248,25 +248,25 @@ Two kinds of credentials, kept apart on purpose:
 
 ## 9. Rate limiting
 
-Required in Phase 1 (D16, D17). Three request-rate limits live in Redis behind the `RateLimiter` port. The fourth limit is a live count, so it lives in Postgres (D29).
+Required in Phase 1 (D16, D17). Three request-rate limits live in Valkey behind the `RateLimiter` port. The fourth limit is a live count, so it lives in Postgres (D29).
 
 | Limit | Applies to | Protects against | Where |
 |---|---|---|---|
-| Requests per API key | Each key | One key hammering the API | Redis |
-| Requests per organisation | All keys of an organisation together | Creating many keys to get around the key limit | Redis |
-| Login and signup per IP address | Unauthenticated auth endpoints | Password guessing and fake signups | Redis |
+| Requests per API key | Each key | One key hammering the API | Valkey |
+| Requests per organisation | All keys of an organisation together | Creating many keys to get around the key limit | Valkey |
+| Login and signup per IP address | Unauthenticated auth endpoints | Password guessing and fake signups | Valkey |
 | Active jobs per organisation | Jobs in `queued`, `retrying` or `running` | One organisation filling the queue and starving others | Postgres, counted up to the cap inside the submit transaction |
-| Refresh and logout | Per IP and per user, **separate from login** | Token-refresh abuse | Redis, fails open (D40) |
+| Refresh and logout | Per IP and per user, **separate from login** | Token-refresh abuse | Valkey, fails open (D40) |
 
 **Per-IP limits and proxies (known gap).** Phase 1 ignores forwarded headers and uses the connection's address. Behind any proxy or load balancer, all users then share one address, so the per-IP login limit does not work as intended. This is deferred (see the Deferred list in the notepad) and must be stated in `docs/rate-limits.md`. It is only valid for local development or a direct connection.
 
 **When a limit is hit:** the API answers `429 Too Many Requests` with a `Retry-After` header and a JSON error body. Normal responses carry rate limit headers so clients can slow down on their own.
 
-**When Redis is down** (D18, explicit by design, revised by D29):
+**When Valkey is down** (D18, explicit by design, revised by D29):
 
-- API, organisation, refresh and logout request limits **fail open**: requests are allowed, and the system logs an error, increments a metric and raises an alert. Refresh has its own limit, separate from login, so that a Redis outage can never block refreshes and log everyone out.
+- API, organisation, refresh and logout request limits **fail open**: requests are allowed, and the system logs an error, increments a metric and raises an alert. Refresh has its own limit, separate from login, so that a Valkey outage can never block refreshes and log everyone out.
 - Login and signup limits **fail closed**: requests are rejected, because without limits they are open to abuse.
-- The **active-jobs cap does not depend on Redis**, so it keeps working during a Redis outage.
+- The **active-jobs cap does not depend on Valkey**, so it keeps working during a Valkey outage.
 
 The code that applies this lives in one place, is named for what it does, and logs every time it triggers. This is a "for now" choice the team may revisit.
 
@@ -274,7 +274,7 @@ The code that applies this lives in one place, is named for what it does, and lo
 
 Limit values are configuration with safe defaults (tuning knobs, not required secrets). Per-organisation overrides are a later extension.
 
-**Documentation:** a dedicated `docs/rate-limits.md` explains every limit, the headers, the 429 body, the Redis-outage behaviour and the proxy caveat. Every endpoint doc in `docs/apis/` states which limits apply to it.
+**Documentation:** a dedicated `docs/rate-limits.md` explains every limit, the headers, the 429 body, the Valkey-outage behaviour and the proxy caveat. Every endpoint doc in `docs/apis/` states which limits apply to it.
 
 ## 10. Job types and handlers (how new work plugs in)
 
@@ -326,11 +326,11 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 
 **Logs:** structured JSON. Every line carries `trace_id`, `span_id`, and, where known, `org_id` and `job_id`.
 
-**Metrics** (`/metrics`): request rate and latency, queue depth per job type, job duration by type, retries, `jobs_failed_total` by job type and error code, sweep re-queues, stuck outbox rows, rate limit rejections, Redis fallback events. `job_type` is a safe metric label; `org_id` and `job_id` are not (too many values).
+**Metrics** (`/metrics`): request rate and latency, queue depth per job type, job duration by type, retries, `jobs_failed_total` by job type and error code, sweep re-queues, stuck outbox rows, rate limit rejections, Valkey fallback events. `job_type` is a safe metric label; `org_id` and `job_id` are not (too many values).
 
 **Stack:** OpenTelemetry collector, Tempo (traces), Loki (logs), Prometheus (metrics, including RabbitMQ's own Prometheus metrics), Grafana (dashboards and alerts).
 
-**Alerts:** a queue has messages but no consumers; queue depth growing per job type; elevated failed-job rate; sweep re-queues; a stuck outbox row; Redis fallback; elevated error rates.
+**Alerts:** a queue has messages but no consumers; queue depth growing per job type; elevated failed-job rate; sweep re-queues; a stuck outbox row; Valkey fallback; elevated error rates.
 
 **Inspecting failures:** read them through the API (`GET /v1/jobs?status=failed` and `GET /v1/jobs/{id}/attempts`) and the metric above.
 
@@ -341,7 +341,7 @@ Definitions are **registered explicitly** in one file, not discovered by magic, 
 | Level | What it covers | Runs against |
 |---|---|---|
 | Unit | Domain and use cases | In-memory fake adapters. Fast, no Docker. |
-| Integration | Each adapter against the real service | Real Postgres, RabbitMQ, Redis, SeaweedFS |
+| Integration | Each adapter against the real service | Real Postgres, RabbitMQ, Valkey, SeaweedFS |
 | Contract | One shared test suite that every implementation of a port must pass | Every adapter of that port |
 | End to end | Full flows through the complete Compose stack | Everything |
 | Docs check | Every route has a matching file in `docs/apis/` | Source and docs |
@@ -366,7 +366,7 @@ Contract tests are what make "replace RabbitMQ with something else" safe: the ne
 - A slow storage service does not lengthen the time the organisation lock is held, and does not stall other submits.
 - Two tabs refreshing with the same token: the second gets the "already refreshed" answer and the login stays valid; reuse after the window revokes the whole family; refresh is refused after `family_expires_at`.
 - Cleaning up old outbox rows does not reset a job's sweep wait.
-- With Redis down, refresh still works (fails open) and login is rejected (fails closed).
+- With Valkey down, refresh still works (fails open) and login is rejected (fails closed).
 - **Isolation contract test:** one organisation can never read another's jobs or files through any repository method. This is the condition for relying on application-level isolation instead of row-level security.
 
 How integration tests start their services (throwaway containers from test code, or a shared Compose test profile) is still open and will be settled when versions are pinned.
@@ -417,20 +417,20 @@ None of these changes the shape of the design.
 
 1. Every listed Python package and `python:3.14-slim` support Python 3.14, and 3.14 has `uuid.uuid7()` in the standard library. Next.js 16.4 needs Node 20.9 or newer. `postgres:18` exists. Decided: Python 3.12 (D41), so ids come from Postgres `uuidv7()`.
 2. **The relay must open its RabbitMQ channel with `on_return_raises=True`** (aio-pika), or an unroutable publish is returned instead of raised (section 11).
-3. **Do not use `aioboto3`:** it pins an old `aiobotocore`, and `aiobotocore` and current `boto3` need conflicting `botocore` versions. Pick one S3 client path (`aiobotocore`, or `boto3` in a thread pool).
+3. **Do not use `aioboto3`:** it pins an old `aiobotocore`, and `aiobotocore` and current `boto3` need conflicting `botocore` versions. Decided: `boto3` in a thread pool, inside the storage adapter only (D47).
 4. SeaweedFS supports presigned URLs, HeadObject, POST policy with an enforced size range, multipart and lifecycle expiry, and needs `-s3.externalUrl` for presigned links to work from outside Docker. Use a presigned **POST policy** for the upload size limit.
 5. The transaction-level advisory lock is documented as released at transaction end; PgBouncer's docs only cover session-level locks, which never work in transaction pooling. PgBouncer is not needed in the first version. `LISTEN/NOTIFY` (a deferred item) cannot go through a transaction-pooled connection.
 6. SQLAlchemy 2.1 needs the `[asyncio]` extra and defaults to psycopg 3, so the `asyncpg` driver must be chosen explicitly. Redis 8 is AGPLv3; Valkey is BSD and wire-compatible. Decided: Valkey (D42).
 
 **Still to do in Phase 0 (needs running code and the user's approval of each dependency, Modules 3 and 5):**
 
-1. Install and test the chosen versions together, including `httpx` on Python 3.14 and Next.js with the TypeScript version its generator picks.
+1. Install and test the chosen versions together, including `httpx` on Python 3.12, SQLAlchemy 2.1 with asyncpg and Alembic (fallback: SQLAlchemy 2.0.54, D46), and Next.js with the TypeScript version its generator picks.
 2. An integration test for the advisory lock under PgBouncer, and the SeaweedFS end-to-end upload checks from outside Docker.
-3. The user's choices still open: SQLAlchemy 2.1 or 2.0, and the S3 client path. (Python 3.12 and Valkey are decided, D41 and D42.)
+3. Decided since: Python 3.12 (D41), Valkey (D42), tooling (D45), SQLAlchemy 2.1 (D46), boto3 in a thread pool (D47), Compose test profile (D48).
 
 **Still to settle:**
 
-7. Integration test setup (throwaway containers vs Compose test profile).
+7. Integration test setup: decided, a Compose test profile (D48).
 8. Default values for the tuning settings in section 15.
 9. Which real sample handler ships in Phase 1 (small, exercises files and progress).
 10. Whether the access token needs organisation switching when a user belongs to several organisations (Phase 1 signup creates one).
@@ -440,7 +440,7 @@ None of these changes the shape of the design.
 - **At-least-once delivery** means duplicate runs are possible. Mitigation: idempotent handlers as a hard rule, and tests that run each handler twice.
 - **No account recovery in Phase 1.** A forgotten password locks the user out, and anyone can sign up with an email address that is not theirs. Accepted for Phase 1 and recorded as deferred.
 - **Per-IP login limits do not work behind a proxy** until the trusted-proxy setting exists. Accepted for Phase 1 and recorded as deferred.
-- **Redis outage** opens the API request limits (by decision). Mitigation: alert and metric on every fallback.
+- **Valkey outage** opens the API request limits (by decision). Mitigation: alert and metric on every fallback.
 - **Slow jobs filling every worker.** Mitigation: separate worker pools by job type.
 - **One large `jobs` table.** Mitigation: UUIDv7 ordering, the right indexes, and a documented partitioning path.
 - **A lost message** after an early ack. Mitigation: the safety-net sweep, with a metric and alert.
