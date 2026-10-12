@@ -2,6 +2,8 @@
 
 Part 7 of 14. Draft for review. Tags are explained in [overview.md](overview.md) section 0.
 
+**Note added 2026-10-12:** the open assumptions DA-01 to DA-19 in this part were settled in `docs/specs/FEAT-20261010-1211-data-access.md` and built; the outbox relay operations (section 2.5) moved to the relay spec. See the notepad entry "Result of FEAT-20261010-1211" for the few places where the build differs from this text (refresh check order, durations instead of timestamps, `start_login_session`).
+
 ## 1. Purpose and non-responsibilities
 
 **Purpose.** The Postgres adapter. It is the only code that writes SQL, and it implements `JobRepository` and the other repositories behind the ports. [DB: 1. Principles] [ARCH: 6. Code structure and the adapter rule] It owns every transaction boundary, lock and index choice for the eleven tables. [DB: 5. How the main operations touch the database]
