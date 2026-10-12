@@ -1,6 +1,6 @@
 # FEAT-20261010-1211: data access (the PostgreSQL adapter)
 
-Status: **draft for approval**. Working branch: `feat-20261010-1211-data-access`, from `master`. Depends on: `FEAT-1204` (schema, merged), `FEAT-1210` (domain, merged), `FEAT-1212` (job types: the type name, version and `max_attempts` come from a definition, so the registry should land first). Used by: the API, worker and maintenance tasks, and the isolation contract test (`FEAT-1226`).
+Status: **approved by the user on 2026-10-12** (yes to all three questions). Working branch: `feat-20261010-1211-data-access`, from `master`. Depends on: `FEAT-1204` (schema, merged), `FEAT-1210` (domain, merged), `FEAT-1212` (job types: the type name, version and `max_attempts` come from a definition, so the registry should land first). Used by: the API, worker and maintenance tasks, and the isolation contract test (`FEAT-1226`).
 
 ## 1. What this builds and why
 

@@ -1,6 +1,6 @@
 # FEAT-20261010-1212: job type registry
 
-Status: **draft for approval**. Working branch: `feat-20261010-1212-job-types`, from `master`. Depends on: `FEAT-20261010-1210` (merged: the retry policy). Used by: `FEAT-1211` (copies the type name, version and max attempts into a job row), `FEAT-1213` to `FEAT-1217` (queue per type), `FEAT-1220` (submit and `GET /v1/job-types`), `FEAT-1216` (worker).
+Status: **approved by the user on 2026-10-12** (yes to all three questions). Working branch: `feat-20261010-1212-job-types`, from `master`. Depends on: `FEAT-20261010-1210` (merged: the retry policy). Used by: `FEAT-1211` (copies the type name, version and max attempts into a job row), `FEAT-1213` to `FEAT-1217` (queue per type), `FEAT-1220` (submit and `GET /v1/job-types`), `FEAT-1216` (worker).
 
 ## 1. What this builds and why
 
