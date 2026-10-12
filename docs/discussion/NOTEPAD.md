@@ -745,6 +745,7 @@ The user asked to verify this before more design work. Method: experiments again
 - **What this means for the design:** the S3 lifecycle rule must not be relied on for retention. The primary mechanism stays the `maintenance` cleanup. Open decision `ISS-20261012-1826`: (A, recommended for development) cleanup only, the rule is documentation; (B) enable the TTL fast path with a one-time `weed shell` step; (C) add the SeaweedFS admin and worker containers. It also strengthens open question 8 (retention and cleanup of files that jobs used: their `files` rows and objects need a cleanup step in `maintenance` anyway).
 - **Tests added (3, in `tests/integration/seaweedfs/test_seaweedfs_expiry.py`, 18 SeaweedFS tests in all, 42 s):** rule alone gives no expiry time; fast path stamps matching objects only; one manual worker pass deletes due objects and keeps the others. The 1 minute TTL wait (about 2 minutes) was measured by hand and is not an automatic test.
 - **Docs updated:** `DATABASE.md` (retention row and verify list) and `storage-adapter.md` (`ensure-bucket`).
+- **Decision (user, 2026-10-12): defer the storage expiry question** (`ISS-20261012-1826`). Nothing is built for it now. Consequence accepted: in the development stack the bucket lifecycle rule expires nothing, and objects stay until something deletes them (the `maintenance` cleanup of unused uploads, when built). Revisit before any real deployment or when the retention of files that jobs used is designed (question 8).
 
 ### Deferred / later (decided to postpone, not Phase 1)
 
