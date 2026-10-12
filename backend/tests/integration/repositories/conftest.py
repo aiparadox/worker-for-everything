@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from qfe.adapters.postgres.accounts import PostgresAccountRepository
 from qfe.adapters.postgres.database import Database as PostgresDatabase
+from qfe.adapters.postgres.execution import PostgresJobExecutionRepository
 from qfe.adapters.postgres.files import PostgresFileRepository
 from qfe.adapters.postgres.jobs import PostgresJobRepository
-from qfe.ports.repositories import FileKind, NewJob, UserCreated
+from qfe.adapters.postgres.maintenance import PostgresMaintenanceRepository
+from qfe.ports.repositories import Created, FileKind, NewJob, UserCreated
 
 # Fixtures defined for the Postgres tests, made available here by importing them.
 from tests.integration.postgres.conftest import (  # noqa: F401
@@ -78,6 +80,11 @@ class AdminSql:
 
     async def scalar(self, sql: str, **params: object) -> Any:
         async with self._engine.connect() as conn:
+            return (await conn.execute(text(sql), params)).scalar_one()
+
+    async def insert_returning(self, sql: str, **params: object) -> Any:
+        """Run an INSERT ... RETURNING in a committed transaction and return the first column."""
+        async with self._engine.begin() as conn:
             return (await conn.execute(text(sql), params)).scalar_one()
 
     async def rows(self, sql: str, **params: object) -> list[Any]:
@@ -148,3 +155,28 @@ def make_file(files: PostgresFileRepository) -> FileFactory:
         return file_id
 
     return make
+
+
+@pytest.fixture
+def execution(db: PostgresDatabase) -> PostgresJobExecutionRepository:  # noqa: F811
+    return PostgresJobExecutionRepository(db)
+
+
+@pytest.fixture
+def maintenance(db: PostgresDatabase) -> PostgresMaintenanceRepository:  # noqa: F811
+    return PostgresMaintenanceRepository(db)
+
+
+async def submit_job_for(
+    jobs: PostgresJobRepository, account: Account, **overrides: Any
+) -> uuid.UUID:
+    """Submit a job and return its id."""
+    result = await jobs.submit_job(new_job(account, **overrides))
+    assert isinstance(result, Created), result
+    return result.job_id
+
+
+async def set_job(admin: AdminSql, job_id: uuid.UUID, **columns: Any) -> None:
+    """Set columns of a job directly (column names come from the test code, never from users)."""
+    assignments = ", ".join(f"{name} = :{name}" for name in columns)
+    await admin.run(f"UPDATE jobs SET {assignments} WHERE id = :job_id", job_id=job_id, **columns)
