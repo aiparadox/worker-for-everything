@@ -3,6 +3,7 @@
 import itertools
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Protocol
 
 import pytest
@@ -11,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from qfe.adapters.postgres.accounts import PostgresAccountRepository
 from qfe.adapters.postgres.database import Database as PostgresDatabase
-from qfe.ports.repositories import UserCreated
+from qfe.adapters.postgres.files import PostgresFileRepository
+from qfe.adapters.postgres.jobs import PostgresJobRepository
+from qfe.ports.repositories import FileKind, NewJob, UserCreated
 
 # Fixtures defined for the Postgres tests, made available here by importing them.
 from tests.integration.postgres.conftest import (  # noqa: F401
@@ -85,3 +88,63 @@ class AdminSql:
 @pytest.fixture
 def admin(migrator_engine: AsyncEngine) -> AdminSql:  # noqa: F811
     return AdminSql(migrator_engine)
+
+
+@pytest.fixture
+def files(db: PostgresDatabase) -> PostgresFileRepository:  # noqa: F811
+    return PostgresFileRepository(db)
+
+
+@pytest.fixture
+def jobs(db: PostgresDatabase) -> PostgresJobRepository:  # noqa: F811
+    return PostgresJobRepository(db)
+
+
+_job_counter = itertools.count(1)
+
+
+def new_job(account: Account, **overrides: Any) -> NewJob:
+    """A valid submit request for ``account``'s organisation; override any field."""
+    number = next(_job_counter)
+    values: dict[str, Any] = {
+        "organisation_id": account.organisation_id,
+        "api_key_id": None,
+        "job_type": "echo",
+        "type_version": "1",
+        "payload": {"message": f"job {number}"},
+        "max_attempts": 4,
+        "trace_id": uuid.uuid4().hex,
+        "input_file_ids": [],
+        "active_jobs_cap": 100,
+    }
+    values.update(overrides)
+    return NewJob(**values)
+
+
+class FileFactory(Protocol):
+    async def __call__(
+        self, account: Account, *, available: bool = True, kind: FileKind = FileKind.INPUT
+    ) -> uuid.UUID: ...
+
+
+@pytest.fixture
+def make_file(files: PostgresFileRepository) -> FileFactory:
+    async def make(
+        account: Account, *, available: bool = True, kind: FileKind = FileKind.INPUT
+    ) -> uuid.UUID:
+        file_id = await files.create_file(
+            organisation_id=account.organisation_id,
+            kind=kind,
+            storage_key=f"orgs/{account.organisation_id}/{uuid.uuid4().hex}",
+            display_name="doc.pdf",
+            content_type="application/pdf",
+            size_bytes=1234,
+            expires_in=timedelta(hours=1),
+        )
+        if available:
+            await files.mark_files_available(
+                organisation_id=account.organisation_id, file_ids=[file_id]
+            )
+        return file_id
+
+    return make
