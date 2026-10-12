@@ -402,7 +402,7 @@ All values are tuning settings with documented defaults. Exact defaults are not 
 | `files` with `status = 'pending'` past `expires_at` | Delete the row and the object (unused uploads) |
 | `files` that jobs use | Follow job retention: removed with the last job that uses them, via `job_files` |
 | `jobs` and `job_attempts` | Keep for a configurable number of days. Purge in batches by `id` range (cheap because ids are time-ordered), and **only rows in a final state** (`succeeded`, `failed`, `cancelled`), so an old job that is stuck mid-flight is never deleted from under a worker. Payload and result can be cleared earlier than the row if needed |
-| Object storage | A bucket lifecycle rule matched to the retention, as a backstop |
+| Object storage | A bucket lifecycle rule matched to the retention, as a backstop. **Checked 2026-10-12 (`ISS-20261012-1825`): a stored rule alone does nothing in SeaweedFS.** Expiry needs the lifecycle worker (run by the SeaweedFS admin, not started by our Compose stack) or the opt-in TTL fast path. Until `ISS-20261012-1826` is decided, do not rely on the rule; the `maintenance` cleanup is the mechanism |
 
 Deleting in large single statements is avoided: batches keep locks short and WAL manageable.
 
@@ -469,5 +469,5 @@ The full list, with the consequence of each, is in the "Deferred / later" sectio
 - Partial indexes, `SKIP LOCKED` and HOT-update behaviour on the `jobs` table under load (docs are known, behaviour is not measured).
 - The advisory lock under PgBouncer transaction pooling, with an integration test. PgBouncer is not needed in the first version; if added, set `max_prepared_statements` to a non-zero value.
 - ~~The Alembic and SQLAlchemy versions together, on the chosen Python.~~ **Done 2026-10-10 (`FEAT-20261010-1204`):** SQLAlchemy 2.1.4, asyncpg 0.32.0 and Alembic 1.20.0 on Python 3.12 against PostgreSQL 18.6: upgrade, repeat upgrade, `alembic check` and concurrent upgrades all pass.
-- SeaweedFS lifecycle expiry behaviour. (`FEAT-20261010-1209`: a lifecycle rule is accepted and read back; whether SeaweedFS then deletes expired objects takes days to observe and is **not verified**. The `maintenance` cleanup of unused uploads is the primary mechanism; the rule is only a backstop.)
+- ~~SeaweedFS lifecycle expiry behaviour.~~ **Done 2026-10-12 (`ISS-20261012-1825`), see the notepad:** the rule needs the lifecycle worker or the TTL fast path to have any effect; how it runs is decided in `ISS-20261012-1826`.
 - Partitioning by id range (the idea in section 11).
