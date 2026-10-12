@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from qfe.adapters.postgres.database import Database as PostgresDatabase
 from tests.support.environment import BACKEND_DIR, load_test_environment
 
 START_HINT = (
@@ -160,3 +161,12 @@ async def migrator_engine(migrated_database: Database) -> AsyncIterator[AsyncEng
     engine = create_async_engine(migrated_database.migrator_url)
     yield engine
     await engine.dispose()
+
+
+@pytest.fixture
+async def db(migrated_database: Database) -> AsyncIterator[PostgresDatabase]:
+    """The adapter's connection pool, connected as ``qfe_app`` to this test's own database. The
+    pool is large enough for the concurrency tests (20 parallel operations)."""
+    database = PostgresDatabase(migrated_database.app_url, pool_size=5, max_overflow=30)
+    yield database
+    await database.dispose()
