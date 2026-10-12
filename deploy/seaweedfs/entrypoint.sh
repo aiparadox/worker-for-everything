@@ -27,7 +27,7 @@ EOF
 exec weed server \
   -dir=/data \
   -master.volumeSizeLimitMB=1024 \
-  -volume.max=20 \
+  -volume.max=100 \
   -s3 \
   -s3.config=/tmp/s3.json \
   -s3.externalUrl="${QFE_STORAGE_PUBLIC_URL}"
