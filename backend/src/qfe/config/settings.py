@@ -49,6 +49,11 @@ class DatabaseSettings(QfeSettings):
     """Connection as the ``qfe_app`` role (reads and writes data, cannot change the schema)."""
 
     database_url: SecretStr
+    # Connections this process may hold: pool size plus overflow. Provisional until open question 3
+    # (connections) is settled; there is no PgBouncer yet (D43).
+    db_pool_size: PositiveInt = 10
+    db_pool_overflow: int = Field(default=5, ge=0)
+    db_pool_timeout_seconds: PositiveInt = 30
 
     @field_validator("database_url")
     @classmethod
