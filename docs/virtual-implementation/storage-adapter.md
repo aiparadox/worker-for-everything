@@ -69,7 +69,7 @@ The S3 client library is `boto3` run in a thread pool (D47). `aioboto3` must not
 
 ### 5.4 `ensure-bucket`
 
-1. At startup, create the bucket if absent and apply a lifecycle rule matching the retention. [DB: 10. Retention and cleanup; Object storage] [ASSUMPTION SA-04]
+1. At startup, create the bucket if absent and apply a lifecycle rule matching the retention. **Checked 2026-10-12 (`ISS-20261012-1825`): the stored rule alone expires nothing in SeaweedFS; it needs the lifecycle worker or the TTL fast path (a `weed shell` command, not an S3 call, so the adapter cannot switch it on). How expiry runs is open (`ISS-20261012-1826`).** [DB: 10. Retention and cleanup; Object storage] [ASSUMPTION SA-04]
 
 ## 6. Failure modes
 
